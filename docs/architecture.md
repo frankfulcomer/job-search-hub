@@ -57,7 +57,7 @@ opportunities and discarded positions are reserved for a future phase.
 
 ### Core Entities
 
-The Phase 1 data model contains exactly six entities:
+The Phase 1 data model contains six entities:
 
 - `COMPANY`
 - `LOCATION`
