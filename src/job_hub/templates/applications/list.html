@@ -33,7 +33,10 @@
             {% for item in result.items %}
             <tr id="application-row-{{ item.application_id }}">
                 <td>{{ item.company_name }}</td>
-                <td>{{ item.job_title }}</td>
+                <td>
+                    <a id="view-application-{{ item.application_id }}"
+                       href="{{ url_for('main.application_detail', application_id=item.application_id) }}">{{ item.job_title }}</a>
+                </td>
                 <td>{{ item.job_location_display or '—' }}</td>
                 <td>{{ item.work_arrangement or '—' }}</td>
                 <td>{{ item.application_date }}</td>

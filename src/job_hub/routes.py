@@ -2,7 +2,7 @@ import math
 import sqlite3
 from datetime import date, datetime
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 
 from job_hub import db
 from job_hub.applications import (
@@ -13,6 +13,7 @@ from job_hub.applications import (
     LocationInput,
     ValidationError,
     create_application,
+    get_application_detail,
     list_applications,
 )
 
@@ -161,3 +162,18 @@ def application_list():
     result = list_applications(connection, sort=sort, direction=direction, page=page)
 
     return render_template("applications/list.html", result=result)
+
+
+@main_bp.route("/applications/<int:application_id>")
+def application_detail(application_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        # SQLite INTEGER bind parameters are 64-bit; an out-of-range id in
+        # the URL can't match a row either way, so treat it as not found.
+        detail = None
+    if detail is None:
+        abort(404)
+
+    return render_template("applications/detail.html", detail=detail)

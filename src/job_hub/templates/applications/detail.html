@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Job Hub - {{ detail.job_title }} at {{ detail.company_name }}{% endblock %}
+
+{% block content %}
+<section id="application-detail-page">
+    <p><a href="{{ url_for('main.application_list') }}">Back to Applications</a></p>
+    <h2>{{ detail.job_title }} at {{ detail.company_name }}</h2>
+
+    <section id="application-section">
+        <h3>Application</h3>
+        <dl>
+            <dt>Job title</dt>
+            <dd id="detail-job-title">{{ detail.job_title }}</dd>
+
+            <dt>Application date</dt>
+            <dd id="detail-application-date">{{ detail.application_date }}</dd>
+
+            <dt>Current status</dt>
+            <dd id="detail-current-status">{{ detail.current_status_name or '—' }}</dd>
+
+            <dt>Source</dt>
+            <dd id="detail-source">{{ detail.source_name }}</dd>
+
+            <dt>Work arrangement</dt>
+            <dd id="detail-work-arrangement">{{ detail.work_arrangement or '—' }}</dd>
+
+            <dt>Employment type</dt>
+            <dd id="detail-employment-type">{{ detail.employment_type or '—' }}</dd>
+
+            {% if detail.compensation_min is not none %}
+            <dt>Minimum compensation</dt>
+            <dd id="detail-compensation-min">{{ detail.compensation_min_display }}</dd>
+            {% endif %}
+
+            {% if detail.compensation_max is not none %}
+            <dt>Maximum compensation</dt>
+            <dd id="detail-compensation-max">{{ detail.compensation_max_display }}</dd>
+            {% endif %}
+
+            {% if detail.compensation_basis %}
+            <dt>Compensation basis</dt>
+            <dd id="detail-compensation-basis">{{ detail.compensation_basis }}</dd>
+            {% endif %}
+        </dl>
+    </section>
+
+    <section id="company-location-section">
+        <h3>Company and Location</h3>
+        <dl>
+            <dt>Company</dt>
+            <dd id="detail-company">{{ detail.company_name }}</dd>
+
+            <dt>Company headquarters</dt>
+            <dd id="detail-company-hq">{{ detail.company_hq_display or '—' }}</dd>
+
+            <dt>Job location</dt>
+            <dd id="detail-job-location">{{ detail.job_location_display or '—' }}</dd>
+        </dl>
+    </section>
+
+    <section id="original-posting-section">
+        <h3>Original Posting</h3>
+        <dl>
+            <dt>External job/requisition ID</dt>
+            <dd id="detail-external-job-id">{{ detail.external_job_id or '—' }}</dd>
+
+            <dt>Job URL</dt>
+            <dd id="detail-job-url">
+                {% if detail.job_url_is_safe_link %}
+                <a id="detail-job-url-link" href="{{ detail.job_url }}">{{ detail.job_url }}</a>
+                {% elif detail.job_url %}
+                {{ detail.job_url }}
+                {% else %}
+                —
+                {% endif %}
+            </dd>
+
+            <dt>Job description</dt>
+            <dd id="detail-job-description">{{ detail.job_description or '—' }}</dd>
+        </dl>
+    </section>
+
+    <section id="history-notes-section">
+        <h3>History and Notes</h3>
+        <dl>
+            <dt>Notes</dt>
+            <dd id="detail-notes">{{ detail.notes or '—' }}</dd>
+        </dl>
+
+        <h4>Status History</h4>
+        <table id="status-history-table">
+            <thead>
+                <tr>
+                    <th scope="col">Status</th>
+                    <th scope="col">Effective</th>
+                    <th scope="col">Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in detail.status_history %}
+                <tr id="status-history-row-{{ entry.application_status_history_id }}"
+                    {% if entry.is_current %}class="current-status" aria-current="true"{% endif %}>
+                    <td>
+                        {{ entry.status_name }}
+                        {%- if entry.is_current %} <span class="current-badge">(current)</span>{% endif %}
+                    </td>
+                    <td>{{ entry.effective_at }}</td>
+                    <td>{{ entry.notes or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</section>
+{% endblock %}

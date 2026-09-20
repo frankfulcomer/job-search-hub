@@ -288,6 +288,19 @@ LIST_DEFAULT_DIRECTION = "desc"
 LIST_PAGE_SIZE = 25
 
 
+def _format_location(city, state_province, country):
+    parts = [city, state_province, country]
+    return ", ".join(part for part in parts if part) or None
+
+
+def _format_number(value):
+    if value is None:
+        return None
+    if value == int(value):
+        return str(int(value))
+    return str(value)
+
+
 @dataclass
 class ApplicationListItem:
     application_id: int
@@ -303,12 +316,11 @@ class ApplicationListItem:
 
     @property
     def job_location_display(self):
-        parts = [
+        return _format_location(
             self.job_location_city,
             self.job_location_state_province,
             self.job_location_country,
-        ]
-        return ", ".join(part for part in parts if part) or None
+        )
 
 
 @dataclass
@@ -418,4 +430,166 @@ def list_applications(
         page=page,
         page_size=page_size,
         total_count=total_count,
+    )
+
+
+@dataclass
+class StatusHistoryEntry:
+    application_status_history_id: int
+    status_name: str
+    effective_at: str
+    notes: str | None
+    is_current: bool
+
+
+@dataclass
+class ApplicationDetail:
+    application_id: int
+    company_name: str
+    job_title: str
+    application_date: str
+    source_name: str
+    work_arrangement: str | None
+    employment_type: str | None
+    compensation_min: float | None
+    compensation_max: float | None
+    compensation_basis: str | None
+    external_job_id: str | None
+    job_url: str | None
+    job_description: str | None
+    notes: str | None
+    job_location_city: str | None
+    job_location_state_province: str | None
+    job_location_country: str | None
+    company_hq_city: str | None
+    company_hq_state_province: str | None
+    company_hq_country: str | None
+    status_history: list[StatusHistoryEntry]
+
+    @property
+    def job_location_display(self):
+        return _format_location(
+            self.job_location_city,
+            self.job_location_state_province,
+            self.job_location_country,
+        )
+
+    @property
+    def company_hq_display(self):
+        return _format_location(
+            self.company_hq_city,
+            self.company_hq_state_province,
+            self.company_hq_country,
+        )
+
+    @property
+    def current_status_name(self):
+        return self.status_history[-1].status_name if self.status_history else None
+
+    @property
+    def compensation_min_display(self):
+        return _format_number(self.compensation_min)
+
+    @property
+    def compensation_max_display(self):
+        return _format_number(self.compensation_max)
+
+    @property
+    def job_url_is_safe_link(self):
+        # job_url has no format validation on entry (FR-011 URL validation is
+        # intentionally deferred; see the Create Application slice). Only
+        # render it as a clickable href for http(s) schemes, so a stored
+        # value like "javascript:..." displays as inert text instead of an
+        # executable link.
+        if not self.job_url:
+            return False
+        return self.job_url.strip().lower().startswith(("http://", "https://"))
+
+
+_DETAIL_QUERY = """
+    SELECT
+        a.application_id,
+        a.job_title,
+        a.application_date,
+        a.work_arrangement,
+        a.employment_type,
+        a.compensation_min,
+        a.compensation_max,
+        a.compensation_basis,
+        a.external_job_id,
+        a.job_url,
+        a.job_description,
+        a.notes,
+        c.name AS company_name,
+        s.name AS source_name,
+        jl.city AS job_location_city,
+        jl.state_province AS job_location_state_province,
+        jl.country AS job_location_country,
+        hql.city AS company_hq_city,
+        hql.state_province AS company_hq_state_province,
+        hql.country AS company_hq_country
+    FROM application a
+    JOIN company c ON c.company_id = a.company_id
+    JOIN source s ON s.source_id = a.source_id
+    LEFT JOIN location jl ON jl.location_id = a.job_location_id
+    LEFT JOIN location hql ON hql.location_id = c.hq_location_id
+    WHERE a.application_id = ?
+"""
+
+_DETAIL_HISTORY_QUERY = """
+    SELECT
+        ash.application_status_history_id,
+        ash.effective_at,
+        ash.notes,
+        st.name AS status_name
+    FROM application_status_history ash
+    JOIN status st ON st.status_id = ash.status_id
+    WHERE ash.application_id = ?
+    ORDER BY ash.effective_at ASC
+"""
+
+
+def get_application_detail(connection, application_id) -> ApplicationDetail | None:
+    row = connection.execute(_DETAIL_QUERY, (application_id,)).fetchone()
+    if row is None:
+        return None
+
+    history_rows = connection.execute(
+        _DETAIL_HISTORY_QUERY, (application_id,)
+    ).fetchall()
+    # UNIQUE(application_id, effective_at) guarantees no tie for "latest";
+    # ascending order (required display order) puts it last.
+    history = [
+        StatusHistoryEntry(
+            application_status_history_id=r["application_status_history_id"],
+            status_name=r["status_name"],
+            effective_at=r["effective_at"],
+            notes=r["notes"],
+            is_current=(i == len(history_rows) - 1),
+        )
+        for i, r in enumerate(history_rows)
+    ]
+
+    return ApplicationDetail(
+        application_id=row["application_id"],
+        job_title=row["job_title"],
+        application_date=row["application_date"],
+        company_name=row["company_name"],
+        source_name=row["source_name"],
+        work_arrangement=row["work_arrangement"],
+        employment_type=row["employment_type"],
+        compensation_min=row["compensation_min"],
+        compensation_max=row["compensation_max"],
+        compensation_basis=row["compensation_basis"],
+        external_job_id=row["external_job_id"],
+        job_url=row["job_url"],
+        job_description=row["job_description"],
+        notes=row["notes"],
+        job_location_city=row["job_location_city"],
+        job_location_state_province=row["job_location_state_province"],
+        job_location_country=row["job_location_country"],
+        company_hq_city=row["company_hq_city"],
+        company_hq_state_province=row["company_hq_state_province"],
+        company_hq_country=row["company_hq_country"],
+        status_history=history,
     )
