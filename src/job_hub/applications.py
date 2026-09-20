@@ -266,3 +266,156 @@ def create_application(
         initial_status_id=status_id,
         status_history_id=status_history_id,
     )
+
+
+# Maps the seven FR-003 list columns to their SQL sort expression(s).
+# FR-003 doesn't define sort keys for compound/reference columns; confirmed
+# 2026-09-20 (see docs/journal/2026-09.md): "status" sorts alphabetically by
+# the displayed status name (not STATUS.display_order's lifecycle sequence),
+# and "job_location" sorts by its displayed components, city then
+# state/province then country.
+LIST_SORT_COLUMNS = {
+    "company": ("c.name",),
+    "job_title": ("a.job_title",),
+    "job_location": ("l.city", "l.state_province", "l.country"),
+    "work_arrangement": ("a.work_arrangement",),
+    "application_date": ("a.application_date",),
+    "status": ("st.name",),
+    "source": ("s.name",),
+}
+LIST_DEFAULT_SORT = "application_date"
+LIST_DEFAULT_DIRECTION = "desc"
+LIST_PAGE_SIZE = 25
+
+
+@dataclass
+class ApplicationListItem:
+    application_id: int
+    company_name: str
+    job_title: str
+    job_location_city: str | None
+    job_location_state_province: str | None
+    job_location_country: str | None
+    work_arrangement: str | None
+    application_date: str
+    source_name: str
+    status_name: str
+
+    @property
+    def job_location_display(self):
+        parts = [
+            self.job_location_city,
+            self.job_location_state_province,
+            self.job_location_country,
+        ]
+        return ", ".join(part for part in parts if part) or None
+
+
+@dataclass
+class ApplicationListPage:
+    items: list[ApplicationListItem]
+    sort: str
+    direction: str
+    page: int
+    page_size: int
+    total_count: int
+
+    @property
+    def total_pages(self):
+        if self.total_count == 0:
+            return 1
+        return -(-self.total_count // self.page_size)
+
+
+_LIST_QUERY = """
+    WITH current_status AS (
+        SELECT application_id, status_id
+        FROM (
+            SELECT application_id, status_id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY application_id ORDER BY effective_at DESC
+                   ) AS rn
+            FROM application_status_history
+        )
+        WHERE rn = 1
+    )
+    SELECT
+        a.application_id,
+        c.name AS company_name,
+        a.job_title,
+        l.city AS job_location_city,
+        l.state_province AS job_location_state_province,
+        l.country AS job_location_country,
+        a.work_arrangement,
+        a.application_date,
+        s.name AS source_name,
+        st.name AS status_name
+    FROM application a
+    JOIN company c ON c.company_id = a.company_id
+    JOIN source s ON s.source_id = a.source_id
+    LEFT JOIN location l ON l.location_id = a.job_location_id
+    JOIN current_status cs ON cs.application_id = a.application_id
+    JOIN status st ON st.status_id = cs.status_id
+    WHERE a.archived_at IS NULL
+    ORDER BY {order_by}
+    LIMIT ? OFFSET ?
+"""
+
+
+def list_applications(
+    connection,
+    *,
+    sort=LIST_DEFAULT_SORT,
+    direction=LIST_DEFAULT_DIRECTION,
+    page=1,
+) -> ApplicationListPage:
+    if sort not in LIST_SORT_COLUMNS:
+        sort = LIST_DEFAULT_SORT
+    if direction not in ("asc", "desc"):
+        direction = LIST_DEFAULT_DIRECTION
+    if not isinstance(page, int) or page < 1:
+        page = 1
+
+    total_count = connection.execute(
+        "SELECT COUNT(*) AS n FROM application WHERE archived_at IS NULL"
+    ).fetchone()["n"]
+
+    page_size = LIST_PAGE_SIZE
+    total_pages = max(1, -(-total_count // page_size))
+    if page > total_pages:
+        page = total_pages
+    offset = (page - 1) * page_size
+
+    sql_direction = "ASC" if direction == "asc" else "DESC"
+    order_terms = [f"{column} {sql_direction}" for column in LIST_SORT_COLUMNS[sort]]
+    order_terms.append(f"a.application_id {sql_direction}")
+    order_by = ", ".join(order_terms)
+
+    rows = connection.execute(
+        _LIST_QUERY.format(order_by=order_by), (page_size, offset)
+    ).fetchall()
+
+    items = [
+        ApplicationListItem(
+            application_id=row["application_id"],
+            company_name=row["company_name"],
+            job_title=row["job_title"],
+            job_location_city=row["job_location_city"],
+            job_location_state_province=row["job_location_state_province"],
+            job_location_country=row["job_location_country"],
+            work_arrangement=row["work_arrangement"],
+            application_date=row["application_date"],
+            source_name=row["source_name"],
+            status_name=row["status_name"],
+        )
+        for row in rows
+    ]
+
+    return ApplicationListPage(
+        items=items,
+        sort=sort,
+        direction=direction,
+        page=page,
+        page_size=page_size,
+        total_count=total_count,
+    )

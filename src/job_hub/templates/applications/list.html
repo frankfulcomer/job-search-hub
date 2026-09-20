@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Job Hub - Applications{% endblock %}
+
+{% macro sort_header(key, label) %}
+{% set is_active = result.sort == key %}
+{% set next_dir = 'desc' if (is_active and result.direction == 'asc') else 'asc' %}
+<th scope="col"
+    {%- if is_active %} aria-sort="{{ 'ascending' if result.direction == 'asc' else 'descending' }}"{% endif %}>
+    <a id="sort-{{ key }}"
+       href="{{ url_for('main.application_list', sort=key, dir=next_dir, page=1) }}">{{ label }}{% if is_active %} {{ '▲' if result.direction == 'asc' else '▼' }}{% endif %}</a>
+</th>
+{% endmacro %}
+
+{% block content %}
+<section id="applications-list-page">
+    <h2>Applications</h2>
+
+    {% if result.items %}
+    <table id="applications-table">
+        <thead>
+            <tr>
+                {{ sort_header('company', 'Company') }}
+                {{ sort_header('job_title', 'Job title') }}
+                {{ sort_header('job_location', 'Job location') }}
+                {{ sort_header('work_arrangement', 'Work arrangement') }}
+                {{ sort_header('application_date', 'Application date') }}
+                {{ sort_header('status', 'Current status') }}
+                {{ sort_header('source', 'Source') }}
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in result.items %}
+            <tr id="application-row-{{ item.application_id }}">
+                <td>{{ item.company_name }}</td>
+                <td>{{ item.job_title }}</td>
+                <td>{{ item.job_location_display or '—' }}</td>
+                <td>{{ item.work_arrangement or '—' }}</td>
+                <td>{{ item.application_date }}</td>
+                <td>{{ item.status_name }}</td>
+                <td>{{ item.source_name }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if result.total_pages > 1 %}
+    <nav id="pagination" aria-label="Applications pagination">
+        {% if result.page > 1 %}
+        <a id="page-prev"
+           href="{{ url_for('main.application_list', sort=result.sort, dir=result.direction, page=result.page - 1) }}">Previous</a>
+        {% endif %}
+        <span id="page-indicator">Page {{ result.page }} of {{ result.total_pages }}</span>
+        {% if result.page < result.total_pages %}
+        <a id="page-next"
+           href="{{ url_for('main.application_list', sort=result.sort, dir=result.direction, page=result.page + 1) }}">Next</a>
+        {% endif %}
+    </nav>
+    {% endif %}
+
+    {% else %}
+    <p id="applications-empty-state">No applications have been recorded yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

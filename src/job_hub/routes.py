@@ -13,6 +13,7 @@ from job_hub.applications import (
     LocationInput,
     ValidationError,
     create_application,
+    list_applications,
 )
 
 main_bp = Blueprint("main", __name__)
@@ -123,7 +124,7 @@ def new_application():
                 f"{fields['company_name'].strip()} (#{result.application_id}).",
                 "success",
             )
-            return redirect(url_for("main.home"))
+            return redirect(url_for("main.application_list"))
         except ValidationError as exc:
             error = str(exc)
             error_field = exc.field
@@ -144,3 +145,19 @@ def new_application():
         compensation_bases=COMPENSATION_BASES,
         today=date.today().isoformat(),
     )
+
+
+@main_bp.route("/applications")
+def application_list():
+    connection = db.get_db()
+
+    sort = request.args.get("sort", "")
+    direction = request.args.get("dir", "")
+    try:
+        page = int(request.args.get("page", 1))
+    except ValueError:
+        page = 1
+
+    result = list_applications(connection, sort=sort, direction=direction, page=page)
+
+    return render_template("applications/list.html", result=result)
