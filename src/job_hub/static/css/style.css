@@ -20,8 +20,80 @@ body {
     font-size: 1.5rem;
 }
 
+#main-nav {
+    margin-top: 0.5rem;
+}
+
+#main-nav a {
+    color: #ffffff;
+    margin-right: 1rem;
+    text-decoration: underline;
+}
+
 #main-content {
     max-width: 960px;
     margin: 0 auto;
     padding: 1.5rem;
+}
+
+#flash-messages {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem;
+}
+
+.flash {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+}
+
+.flash-success {
+    background-color: #dcfce7;
+    color: #166534;
+}
+
+.form-error {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    background-color: #fee2e2;
+    color: #991b1b;
+}
+
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+    border-color: #dc2626;
+    border-width: 2px;
+}
+
+fieldset {
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    padding: 1rem;
+}
+
+.form-field {
+    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.form-field label {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.form-field small {
+    color: #4b5563;
+    margin-top: 0.25rem;
+}
+
+#submit-application {
+    padding: 0.6rem 1.2rem;
+    background-color: #1f2937;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
 }

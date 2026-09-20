@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 
-WORK_ARRANGEMENTS = {"ONSITE", "HYBRID", "REMOTE"}
-EMPLOYMENT_TYPES = {"FULL_TIME", "PART_TIME", "CONTRACT", "TEMPORARY"}
-COMPENSATION_BASES = {"ANNUAL", "HOURLY"}
+WORK_ARRANGEMENTS = ("ONSITE", "HYBRID", "REMOTE")
+EMPLOYMENT_TYPES = ("FULL_TIME", "PART_TIME", "CONTRACT", "TEMPORARY")
+COMPENSATION_BASES = ("ANNUAL", "HOURLY")
 DEFAULT_INITIAL_STATUS = "APPLIED"
 
 # Matches the whitespace convention in schema.sql / ADR 0001: space, tab, CR, LF.

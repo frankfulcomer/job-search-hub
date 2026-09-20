@@ -125,14 +125,31 @@ duplicates or resets existing rows.
 
 ### Initialization trigger point
 
-Schema creation and seeding (`job_hub.db.init_db`) are invoked explicitly —
-via the `flask init-db` CLI command or a direct call — rather than
-automatically inside `create_app()`. This keeps plain `create_app()` calls
-(used by application-factory tests) from implicitly creating or touching a
-database file on disk, and keeps "ordinary startup shall not reset existing
-data" trivially satisfied since no route yet reads or writes the database.
-This should be revisited once CRUD routes exist and need guaranteed schema
-presence at request time.
+**Revised.** Schema creation and seeding (`job_hub.db.init_db`) originally
+ran only on explicit request (`flask init-db` or a direct call), specifically
+to keep plain `create_app()` calls — used by application-factory tests —
+from implicitly creating or touching a database file on disk. That trade-off
+was recorded as provisional, to be revisited once CRUD routes existed and
+needed guaranteed schema presence at request time; the Create Application
+route reached that point; a fresh checkout with no prior `flask init-db` step
+would 500 on first use, which fails Phase 1's usability expectations for a
+personal local application.
+
+`create_app()` now calls `db.init_db()` unconditionally, inside an app
+context, immediately after `db.init_app(app)`. This is safe to run on every
+application construction because `init_db` is fully idempotent
+(`CREATE TABLE IF NOT EXISTS` plus `INSERT OR IGNORE` seeding): it never
+drops a table, never duplicates seed rows, and never touches existing
+application data, so "ordinary application startup shall not reset existing
+data" still holds. The `flask init-db` CLI command remains available for
+explicit/manual use (e.g., scripting), but is no longer required for the
+application to function.
+
+The test-isolation trade-off that motivated the original explicit-only
+design is instead handled by giving every test that constructs a real
+`Flask` app (via `create_app()`) an isolated `DATABASE` path (a `tmp_path`
+file), rather than by keeping initialization manual. No test calls
+`create_app()` without a config override.
 
 ## Consequences
 
@@ -142,9 +159,10 @@ presence at request time.
   are implementation choices that should be reconsidered if future
   requirements introduce conflicting needs (e.g., a documented additional
   employment type).
-- `flask init-db` (or `job_hub.db.init_db`) must be run explicitly before any
-  future CRUD code can read from or write to the database; this is not yet
-  wired into ordinary application startup.
+- Schema/seed initialization now runs automatically and idempotently on
+  every `create_app()` call; a fresh checkout works without a manual setup
+  step. Any test that builds a real app must supply an isolated `DATABASE`
+  path so it never touches the user's personal database.
 - Non-ASCII case folding remains an accepted limitation (see above); this
   should be revisited only if real Phase 1 usage surfaces it as an actual
   data-quality problem, not preemptively generalized.

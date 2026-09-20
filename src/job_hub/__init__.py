@@ -17,6 +17,8 @@ def create_app(config=None):
     from job_hub import db
 
     db.init_app(app)
+    with app.app_context():
+        db.init_db(db.get_db())
 
     from job_hub.routes import main_bp
 

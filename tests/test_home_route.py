@@ -4,9 +4,12 @@ from job_hub import create_app
 
 
 @pytest.fixture
-def client():
-    app = create_app()
-    app.config.update(TESTING=True)
+def client(tmp_path):
+    class TestConfig:
+        DATABASE = str(tmp_path / "test.sqlite3")
+        TESTING = True
+
+    app = create_app(TestConfig)
     with app.test_client() as client:
         yield client
 
