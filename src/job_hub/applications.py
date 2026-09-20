@@ -64,23 +64,28 @@ def _format_timestamp(value: datetime) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%S.") + f"{value.microsecond // 1000:03d}Z"
 
 
-def _resolve_or_create_company(connection, name, hq_location: LocationInput | None):
+def _resolve_or_create_company(connection, name, hq_location: LocationInput | None = None):
+    """Find or create a company by normalized name.
+
+    Returns (company_id, was_created). An existing company's headquarters is
+    never touched here (architecture.md); hq_location is only used to seed a
+    newly-created company's headquarters, matching create_application's
+    "new company, optional headquarters" behavior.
+    """
     row = connection.execute(
         f"SELECT company_id FROM company WHERE {_NORMALIZE_SQL.format(expr='name')} = "
         f"{_NORMALIZE_SQL.format(expr='?')}",
         (name,),
     ).fetchone()
     if row is not None:
-        return row["company_id"]
+        return row["company_id"], False
 
-    # Only resolve/create a headquarters location when the company itself is
-    # new; an existing company keeps its own headquarters (architecture.md).
     hq_location_id = _resolve_or_create_location(connection, hq_location)
     cursor = connection.execute(
         "INSERT INTO company (name, hq_location_id) VALUES (?, ?)",
         (name, hq_location_id),
     )
-    return cursor.lastrowid
+    return cursor.lastrowid, True
 
 
 def _resolve_or_create_source(connection, name):
@@ -209,7 +214,7 @@ def create_application(
             initial_status_name, application_date, initial_status_effective_at, now
         )
 
-        company_id = _resolve_or_create_company(
+        company_id, _ = _resolve_or_create_company(
             connection, company_name, company_hq_location
         )
         source_id = _resolve_or_create_source(connection, source_name)
@@ -592,4 +597,223 @@ def get_application_detail(connection, application_id) -> ApplicationDetail | No
         company_hq_state_province=row["company_hq_state_province"],
         company_hq_country=row["company_hq_country"],
         status_history=history,
+    )
+
+
+class SharedHeadquartersChangeRequiresConfirmation(Exception):
+    """Raised when an edit would change a company's headquarters and that
+    company is associated with other applications (FR-006). Nothing is
+    persisted when this is raised; the caller must resubmit with
+    confirm_shared_headquarters_change=True to apply the change."""
+
+    def __init__(
+        self,
+        company_name,
+        affected_application_count,
+        current_headquarters_display,
+        new_headquarters_display,
+    ):
+        super().__init__(
+            f"Changing the headquarters for {company_name!r} affects "
+            f"{affected_application_count} other application(s)"
+        )
+        self.company_name = company_name
+        self.affected_application_count = affected_application_count
+        self.current_headquarters_display = current_headquarters_display
+        self.new_headquarters_display = new_headquarters_display
+
+
+@dataclass
+class EditApplicationResult:
+    application_id: int
+    company_id: int
+    source_id: int
+    job_location_id: int | None
+    company_reassigned: bool
+
+
+def _location_id_display(connection, location_id):
+    if location_id is None:
+        return None
+    row = connection.execute(
+        "SELECT city, state_province, country FROM location WHERE location_id = ?",
+        (location_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _format_location(row["city"], row["state_province"], row["country"])
+
+
+def _apply_company_headquarters_change(
+    connection, company_id, is_new_company, hq_location, application_id, confirmed
+):
+    new_city = _trim(hq_location.city) if hq_location else None
+    new_state_province = _trim(hq_location.state_province) if hq_location else None
+    new_country = _trim(hq_location.country) if hq_location else None
+
+    current_hq_id = connection.execute(
+        "SELECT hq_location_id FROM company WHERE company_id = ?", (company_id,)
+    ).fetchone()["hq_location_id"]
+    new_hq_id = _resolve_or_create_location(connection, hq_location)
+
+    if new_hq_id == current_hq_id:
+        return
+
+    if not is_new_company:
+        # A brand-new company (created earlier in this same edit) can't yet
+        # be associated with any other application, so its headquarters can
+        # be set directly regardless of confirmation.
+        other_application_count = connection.execute(
+            "SELECT COUNT(*) AS n FROM application "
+            "WHERE company_id = ? AND application_id != ?",
+            (company_id, application_id),
+        ).fetchone()["n"]
+        if other_application_count > 0 and not confirmed:
+            company_name = connection.execute(
+                "SELECT name FROM company WHERE company_id = ?", (company_id,)
+            ).fetchone()["name"]
+            raise SharedHeadquartersChangeRequiresConfirmation(
+                company_name=company_name,
+                affected_application_count=other_application_count,
+                current_headquarters_display=_location_id_display(
+                    connection, current_hq_id
+                ),
+                new_headquarters_display=_format_location(
+                    new_city, new_state_province, new_country
+                ),
+            )
+
+    connection.execute(
+        "UPDATE company SET hq_location_id = ? WHERE company_id = ?",
+        (new_hq_id, company_id),
+    )
+
+
+def edit_application(
+    connection,
+    application_id,
+    *,
+    company_name,
+    job_title,
+    application_date: date,
+    source_name,
+    job_location: LocationInput | None = None,
+    company_hq_location: LocationInput | None = None,
+    job_description=None,
+    job_url=None,
+    external_job_id=None,
+    work_arrangement=None,
+    employment_type=None,
+    compensation_min=None,
+    compensation_max=None,
+    compensation_basis=None,
+    notes=None,
+    confirm_shared_headquarters_change=False,
+) -> EditApplicationResult | None:
+    existing = connection.execute(
+        "SELECT company_id FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    if existing is None:
+        return None
+    original_company_id = existing["company_id"]
+
+    company_name = _require_text("company_name", company_name)
+    job_title = _require_text("job_title", job_title)
+    source_name = _require_text("source_name", source_name)
+    if application_date is None:
+        raise ValidationError("application_date", "is required")
+
+    work_arrangement = _require_enum(
+        "work_arrangement", work_arrangement, WORK_ARRANGEMENTS
+    )
+    employment_type = _require_enum(
+        "employment_type", employment_type, EMPLOYMENT_TYPES
+    )
+    compensation_basis = _require_enum(
+        "compensation_basis", compensation_basis, COMPENSATION_BASES
+    )
+
+    external_job_id = _trim(external_job_id) or None
+    job_url = _trim(job_url) or None
+
+    try:
+        company_id, is_new_company = _resolve_or_create_company(
+            connection, company_name
+        )
+        company_reassigned = company_id != original_company_id
+
+        if company_reassigned:
+            # architecture.md: "Changing an application's company shall
+            # ... display the selected company's headquarters rather than
+            # carry over the previous company's headquarters." Submitted
+            # headquarters fields on this same request may be stale values
+            # left over from the company being replaced (the form has no
+            # way to refresh them without a round trip), so never apply
+            # them as part of a reassignment - the new/target company's own
+            # headquarters (None for a brand-new company) is used as-is.
+            # Editing that company's headquarters is a separate, subsequent
+            # edit, once the form reflects its real current value.
+            pass
+        else:
+            _apply_company_headquarters_change(
+                connection,
+                company_id,
+                is_new_company,
+                company_hq_location,
+                application_id,
+                confirm_shared_headquarters_change,
+            )
+        source_id = _resolve_or_create_source(connection, source_name)
+        job_location_id = _resolve_or_create_location(connection, job_location)
+
+        connection.execute(
+            """
+            UPDATE application SET
+                company_id = ?,
+                job_location_id = ?,
+                source_id = ?,
+                job_title = ?,
+                external_job_id = ?,
+                job_url = ?,
+                job_description = ?,
+                work_arrangement = ?,
+                employment_type = ?,
+                compensation_min = ?,
+                compensation_max = ?,
+                compensation_basis = ?,
+                application_date = ?,
+                notes = ?
+            WHERE application_id = ?
+            """,
+            (
+                company_id,
+                job_location_id,
+                source_id,
+                job_title,
+                external_job_id,
+                job_url,
+                job_description,
+                work_arrangement,
+                employment_type,
+                compensation_min,
+                compensation_max,
+                compensation_basis,
+                _format_date(application_date),
+                notes,
+                application_id,
+            ),
+        )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return EditApplicationResult(
+        application_id=application_id,
+        company_id=company_id,
+        source_id=source_id,
+        job_location_id=job_location_id,
+        company_reassigned=company_reassigned,
     )

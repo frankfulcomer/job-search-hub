@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "applications/_form_macros.html" as forms with context %}
+
+{% block title %}Job Hub - Edit Application{% endblock %}
+
+{% block content %}
+<section id="edit-application-page">
+    <p><a href="{{ url_for('main.application_detail', application_id=application_id) }}">Back to Application</a></p>
+    <h2>Edit Application</h2>
+
+    {% if error %}
+    <p id="form-error" class="form-error" role="alert">{{ error }}</p>
+    {% endif %}
+
+    {% if confirmation %}
+    <div id="shared-headquarters-warning" class="warning-banner" role="alert">
+        <p>
+            Changing the headquarters for <strong>{{ confirmation.company_name }}</strong> is a
+            company-level change and will also affect
+            {{ confirmation.affected_application_count }} other application(s) associated with
+            this company.
+        </p>
+        <p>Current headquarters: {{ confirmation.current_headquarters_display or '—' }}</p>
+        <p>New headquarters: {{ confirmation.new_headquarters_display or '—' }}</p>
+    </div>
+    {% endif %}
+
+    <form id="edit-application-form" method="post"
+          action="{{ url_for('main.application_edit', application_id=application_id) }}">
+        <fieldset>
+            <legend>Application</legend>
+
+            <div class="form-field">
+                <label for="company_name">Company</label>
+                <input type="text" id="company_name" name="company_name" required
+                       {{ forms.invalid('company_name') }}
+                       value="{{ form_data.get('company_name', '') }}">
+            </div>
+
+            <div class="form-field">
+                <label for="job_title">Job title</label>
+                <input type="text" id="job_title" name="job_title" required
+                       {{ forms.invalid('job_title') }}
+                       value="{{ form_data.get('job_title', '') }}">
+            </div>
+
+            <div class="form-field">
+                <label for="application_date">Application date</label>
+                <input type="date" id="application_date" name="application_date" required
+                       {{ forms.invalid('application_date') }}
+                       value="{{ form_data.get('application_date', '') }}">
+            </div>
+
+            <div class="form-field">
+                <label for="source_name">Source</label>
+                <input type="text" id="source_name" name="source_name" required
+                       {{ forms.invalid('source_name') }}
+                       value="{{ form_data.get('source_name', '') }}">
+            </div>
+        </fieldset>
+
+        {{ forms.job_location_fields() }}
+        {{ forms.company_headquarters_fields() }}
+        {{ forms.position_detail_fields() }}
+
+        {% if confirmation %}
+        <div class="form-field">
+            <label for="confirm_shared_headquarters_change">
+                <input type="checkbox" id="confirm_shared_headquarters_change"
+                       name="confirm_shared_headquarters_change" value="1">
+                I understand this will change the headquarters location for all applications
+                associated with {{ confirmation.company_name }}.
+            </label>
+        </div>
+        {% endif %}
+
+        <button type="submit" id="submit-edit-application">Save changes</button>
+        <a id="cancel-edit"
+           href="{{ url_for('main.application_detail', application_id=application_id) }}">Cancel</a>
+    </form>
+</section>
+{% endblock %}

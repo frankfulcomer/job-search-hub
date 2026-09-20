@@ -6,6 +6,10 @@
 <section id="application-detail-page">
     <p><a href="{{ url_for('main.application_list') }}">Back to Applications</a></p>
     <h2>{{ detail.job_title }} at {{ detail.company_name }}</h2>
+    <p>
+        <a id="edit-application-link"
+           href="{{ url_for('main.application_edit', application_id=detail.application_id) }}">Edit Application</a>
+    </p>
 
     <section id="application-section">
         <h3>Application</h3>

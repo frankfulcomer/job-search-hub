@@ -120,11 +120,32 @@ body {
     color: #166534;
 }
 
+.flash-info {
+    background-color: #dbeafe;
+    color: #1e40af;
+}
+
 .form-error {
     padding: 0.75rem 1rem;
     border-radius: 4px;
     background-color: #fee2e2;
     color: #991b1b;
+}
+
+.warning-banner {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    background-color: #fef9c3;
+    color: #854d0e;
+    margin-bottom: 1rem;
+}
+
+.warning-banner p {
+    margin: 0 0 0.5rem;
+}
+
+.warning-banner p:last-child {
+    margin-bottom: 0;
 }
 
 input[aria-invalid="true"],

@@ -1,9 +1,9 @@
 {% extends "base.html" %}
+{% import "applications/_form_macros.html" as forms with context %}
 
 {% block title %}Job Hub - New Application{% endblock %}
 
 {% block content %}
-{% macro invalid(name) %}{% if error_field == name %}aria-invalid="true"{% endif %}{% endmacro %}
 <section id="new-application-page">
     <h2>New Application</h2>
 
@@ -18,34 +18,34 @@
             <div class="form-field">
                 <label for="company_name">Company</label>
                 <input type="text" id="company_name" name="company_name" required
-                       {{ invalid('company_name') }}
+                       {{ forms.invalid('company_name') }}
                        value="{{ form_data.get('company_name', '') }}">
             </div>
 
             <div class="form-field">
                 <label for="job_title">Job title</label>
                 <input type="text" id="job_title" name="job_title" required
-                       {{ invalid('job_title') }}
+                       {{ forms.invalid('job_title') }}
                        value="{{ form_data.get('job_title', '') }}">
             </div>
 
             <div class="form-field">
                 <label for="application_date">Application date</label>
                 <input type="date" id="application_date" name="application_date" required
-                       {{ invalid('application_date') }}
+                       {{ forms.invalid('application_date') }}
                        value="{{ form_data.get('application_date', today) }}">
             </div>
 
             <div class="form-field">
                 <label for="source_name">Source</label>
                 <input type="text" id="source_name" name="source_name" required
-                       {{ invalid('source_name') }}
+                       {{ forms.invalid('source_name') }}
                        value="{{ form_data.get('source_name', '') }}">
             </div>
 
             <div class="form-field">
                 <label for="initial_status_name">Initial status</label>
-                <select id="initial_status_name" name="initial_status_name" {{ invalid('initial_status_name') }}>
+                <select id="initial_status_name" name="initial_status_name" {{ forms.invalid('initial_status_name') }}>
                     {% for status in status_options %}
                     <option value="{{ status['name'] }}"
                         {% if form_data.get('initial_status_name', 'APPLIED') == status['name'] %}selected{% endif %}>
@@ -59,128 +59,15 @@
                 <label for="initial_status_effective_at">Initial status effective date/time</label>
                 <input type="datetime-local" id="initial_status_effective_at"
                        name="initial_status_effective_at"
-                       {{ invalid('initial_status_effective_at') }}
+                       {{ forms.invalid('initial_status_effective_at') }}
                        value="{{ form_data.get('initial_status_effective_at', '') }}">
                 <small>Required unless the status is Applied and the application date is today.</small>
             </div>
         </fieldset>
 
-        <fieldset>
-            <legend>Job location (optional)</legend>
-
-            <div class="form-field">
-                <label for="job_location_city">City</label>
-                <input type="text" id="job_location_city" name="job_location_city"
-                       value="{{ form_data.get('job_location_city', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="job_location_state_province">State/Province</label>
-                <input type="text" id="job_location_state_province" name="job_location_state_province"
-                       value="{{ form_data.get('job_location_state_province', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="job_location_country">Country</label>
-                <input type="text" id="job_location_country" name="job_location_country"
-                       value="{{ form_data.get('job_location_country', '') }}">
-            </div>
-        </fieldset>
-
-        <fieldset>
-            <legend>Company headquarters (optional)</legend>
-
-            <div class="form-field">
-                <label for="company_hq_city">City</label>
-                <input type="text" id="company_hq_city" name="company_hq_city"
-                       value="{{ form_data.get('company_hq_city', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="company_hq_state_province">State/Province</label>
-                <input type="text" id="company_hq_state_province" name="company_hq_state_province"
-                       value="{{ form_data.get('company_hq_state_province', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="company_hq_country">Country</label>
-                <input type="text" id="company_hq_country" name="company_hq_country"
-                       value="{{ form_data.get('company_hq_country', '') }}">
-            </div>
-        </fieldset>
-
-        <fieldset>
-            <legend>Position details (optional)</legend>
-
-            <div class="form-field">
-                <label for="work_arrangement">Work arrangement</label>
-                <select id="work_arrangement" name="work_arrangement" {{ invalid('work_arrangement') }}>
-                    <option value="">-- Not specified --</option>
-                    {% for value in work_arrangements %}
-                    <option value="{{ value }}"
-                        {% if form_data.get('work_arrangement') == value %}selected{% endif %}>{{ value }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-field">
-                <label for="employment_type">Employment type</label>
-                <select id="employment_type" name="employment_type" {{ invalid('employment_type') }}>
-                    <option value="">-- Not specified --</option>
-                    {% for value in employment_types %}
-                    <option value="{{ value }}"
-                        {% if form_data.get('employment_type') == value %}selected{% endif %}>{{ value }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-field">
-                <label for="compensation_min">Minimum compensation</label>
-                <input type="number" step="0.01" id="compensation_min" name="compensation_min"
-                       {{ invalid('compensation_min') }}
-                       value="{{ form_data.get('compensation_min', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="compensation_max">Maximum compensation</label>
-                <input type="number" step="0.01" id="compensation_max" name="compensation_max"
-                       {{ invalid('compensation_max') }}
-                       value="{{ form_data.get('compensation_max', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="compensation_basis">Compensation basis</label>
-                <select id="compensation_basis" name="compensation_basis" {{ invalid('compensation_basis') }}>
-                    <option value="">-- Not specified --</option>
-                    {% for value in compensation_bases %}
-                    <option value="{{ value }}"
-                        {% if form_data.get('compensation_basis') == value %}selected{% endif %}>{{ value }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <div class="form-field">
-                <label for="external_job_id">External job/requisition ID</label>
-                <input type="text" id="external_job_id" name="external_job_id"
-                       value="{{ form_data.get('external_job_id', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="job_url">Job URL</label>
-                <input type="url" id="job_url" name="job_url"
-                       value="{{ form_data.get('job_url', '') }}">
-            </div>
-
-            <div class="form-field">
-                <label for="job_description">Job description</label>
-                <textarea id="job_description" name="job_description" rows="5">{{ form_data.get('job_description', '') }}</textarea>
-            </div>
-
-            <div class="form-field">
-                <label for="notes">Notes</label>
-                <textarea id="notes" name="notes" rows="3">{{ form_data.get('notes', '') }}</textarea>
-            </div>
-        </fieldset>
+        {{ forms.job_location_fields() }}
+        {{ forms.company_headquarters_fields() }}
+        {{ forms.position_detail_fields() }}
 
         <button type="submit" id="submit-application">Save application</button>
     </form>

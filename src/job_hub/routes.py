@@ -11,8 +11,10 @@ from job_hub.applications import (
     EMPLOYMENT_TYPES,
     WORK_ARRANGEMENTS,
     LocationInput,
+    SharedHeadquartersChangeRequiresConfirmation,
     ValidationError,
     create_application,
+    edit_application,
     get_application_detail,
     list_applications,
 )
@@ -73,17 +75,12 @@ def _location_from_form(form, prefix):
     )
 
 
-def _parse_application_form(form):
+def _parse_common_application_fields(form):
     return {
         "company_name": form.get("company_name", ""),
         "job_title": form.get("job_title", ""),
         "application_date": _parse_application_date(form.get("application_date")),
         "source_name": form.get("source_name", ""),
-        "initial_status_name": form.get("initial_status_name")
-        or DEFAULT_INITIAL_STATUS,
-        "initial_status_effective_at": _parse_effective_at(
-            form.get("initial_status_effective_at")
-        ),
         "job_location": _location_from_form(form, "job_location"),
         "company_hq_location": _location_from_form(form, "company_hq"),
         "job_description": _blank_to_none(form.get("job_description")),
@@ -99,6 +96,52 @@ def _parse_application_form(form):
         ),
         "compensation_basis": _blank_to_none(form.get("compensation_basis")),
         "notes": _blank_to_none(form.get("notes")),
+    }
+
+
+def _parse_application_form(form):
+    fields = _parse_common_application_fields(form)
+    fields["initial_status_name"] = (
+        form.get("initial_status_name") or DEFAULT_INITIAL_STATUS
+    )
+    fields["initial_status_effective_at"] = _parse_effective_at(
+        form.get("initial_status_effective_at")
+    )
+    return fields
+
+
+def _parse_edit_application_form(form):
+    fields = _parse_common_application_fields(form)
+    fields["confirm_shared_headquarters_change"] = (
+        form.get("confirm_shared_headquarters_change") == "1"
+    )
+    return fields
+
+
+def _edit_form_data_from_detail(detail):
+    def as_text(value):
+        return value if value is not None else ""
+
+    return {
+        "company_name": detail.company_name,
+        "job_title": detail.job_title,
+        "application_date": detail.application_date,
+        "source_name": detail.source_name,
+        "job_location_city": as_text(detail.job_location_city),
+        "job_location_state_province": as_text(detail.job_location_state_province),
+        "job_location_country": as_text(detail.job_location_country),
+        "company_hq_city": as_text(detail.company_hq_city),
+        "company_hq_state_province": as_text(detail.company_hq_state_province),
+        "company_hq_country": as_text(detail.company_hq_country),
+        "work_arrangement": as_text(detail.work_arrangement),
+        "employment_type": as_text(detail.employment_type),
+        "compensation_min": as_text(detail.compensation_min_display),
+        "compensation_max": as_text(detail.compensation_max_display),
+        "compensation_basis": as_text(detail.compensation_basis),
+        "external_job_id": as_text(detail.external_job_id),
+        "job_url": as_text(detail.job_url),
+        "job_description": as_text(detail.job_description),
+        "notes": as_text(detail.notes),
     }
 
 
@@ -177,3 +220,62 @@ def application_detail(application_id):
         abort(404)
 
     return render_template("applications/detail.html", detail=detail)
+
+
+@main_bp.route("/applications/<int:application_id>/edit", methods=["GET", "POST"])
+def application_edit(application_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        detail = None
+    if detail is None:
+        abort(404)
+
+    error = None
+    error_field = None
+    confirmation = None
+    form_data = _edit_form_data_from_detail(detail)
+
+    if request.method == "POST":
+        form_data = request.form
+        try:
+            fields = _parse_edit_application_form(form_data)
+            result = edit_application(connection, application_id, **fields)
+            flash(
+                f"Updated application for {fields['job_title'].strip()} at "
+                f"{fields['company_name'].strip()}.",
+                "success",
+            )
+            if result.company_reassigned:
+                flash(
+                    "Company changed. Any headquarters submitted with this edit "
+                    "was not applied - edit the application again if you'd like "
+                    "to update the new company's headquarters.",
+                    "info",
+                )
+            return redirect(
+                url_for("main.application_detail", application_id=application_id)
+            )
+        except SharedHeadquartersChangeRequiresConfirmation as exc:
+            confirmation = exc
+        except ValidationError as exc:
+            error = str(exc)
+            error_field = exc.field
+        except sqlite3.IntegrityError:
+            error = (
+                "The application could not be saved because it conflicts with "
+                "existing data. Please review the values and try again."
+            )
+
+    return render_template(
+        "applications/edit.html",
+        application_id=application_id,
+        error=error,
+        error_field=error_field,
+        confirmation=confirmation,
+        form_data=form_data,
+        work_arrangements=WORK_ARRANGEMENTS,
+        employment_types=EMPLOYMENT_TYPES,
+        compensation_bases=COMPENSATION_BASES,
+    )

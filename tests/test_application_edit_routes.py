@@ -1,0 +1,364 @@
+from datetime import date
+
+import pytest
+
+from job_hub import create_app, db
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    return str(tmp_path / "test.sqlite3")
+
+
+@pytest.fixture
+def app(db_path):
+    class TestConfig:
+        DATABASE = db_path
+        SECRET_KEY = "test"
+
+    return create_app(TestConfig)
+
+
+@pytest.fixture
+def client(app):
+    return app.test_client()
+
+
+def _post_application(client, **overrides):
+    form = {
+        "company_name": "Acme Corp",
+        "job_title": "Engineer",
+        "application_date": date.today().isoformat(),
+        "source_name": "Job Board",
+    }
+    form.update(overrides)
+    client.post("/applications/new", data=form)
+
+
+def _application_id(db_path):
+    conn = db.connect(db_path)
+    row = conn.execute(
+        "SELECT application_id FROM application ORDER BY application_id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return row["application_id"]
+
+
+def _edit_form(**overrides):
+    form = {
+        "company_name": "Acme Corp",
+        "job_title": "Engineer",
+        "application_date": date.today().isoformat(),
+        "source_name": "Job Board",
+    }
+    form.update(overrides)
+    return form
+
+
+def test_get_edit_form_returns_200_prefilled(client, db_path):
+    _post_application(client, job_title="Staff Engineer")
+    application_id = _application_id(db_path)
+
+    response = client.get(f"/applications/{application_id}/edit")
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="edit-application-form"' in body
+    assert 'value="Staff Engineer"' in body
+    assert "None" not in body
+
+
+def test_get_edit_form_for_nonexistent_id_returns_404(client):
+    response = client.get("/applications/999999/edit")
+
+    assert response.status_code == 404
+
+
+def test_detail_page_links_to_edit_page(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    body = client.get(f"/applications/{application_id}").data.decode()
+
+    assert f'href="/applications/{application_id}/edit"' in body
+
+
+def test_edit_page_has_cancel_link_to_detail(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    body = client.get(f"/applications/{application_id}/edit").data.decode()
+
+    assert 'id="cancel-edit"' in body
+    assert f'href="/applications/{application_id}">Cancel' in body
+
+
+def test_post_valid_edit_updates_and_redirects_to_detail(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(job_title="Updated Title"),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == f"/applications/{application_id}"
+
+    conn = db.connect(db_path)
+    row = conn.execute(
+        "SELECT job_title FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    assert row["job_title"] == "Updated Title"
+    conn.close()
+
+
+def test_post_edit_preserves_status_history(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit", data=_edit_form(job_title="Changed")
+    )
+
+    conn = db.connect(db_path)
+    count = conn.execute(
+        "SELECT COUNT(*) AS n FROM application_status_history WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()["n"]
+    conn.close()
+    assert count == 1
+
+
+def test_post_edit_validation_failure_shows_error_and_preserves_input(
+    client, db_path
+):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit", data=_edit_form(job_title="")
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in body
+    assert 'value="Acme Corp"' in body
+
+
+def test_post_edit_shared_headquarters_change_shows_confirmation_without_persisting(
+    client, db_path
+):
+    _post_application(
+        client,
+        company_hq_city="Austin",
+        company_hq_state_province="TX",
+        company_hq_country="USA",
+    )
+    application_id = _application_id(db_path)
+    _post_application(client, job_title="Engineer 2")  # shares the same company
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            company_hq_city="Chicago",
+            company_hq_state_province="IL",
+            company_hq_country="USA",
+        ),
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="shared-headquarters-warning"' in body
+    assert 'id="confirm_shared_headquarters_change"' in body
+
+    conn = db.connect(db_path)
+    hq_city = conn.execute(
+        "SELECT l.city FROM location l "
+        "JOIN company c ON c.hq_location_id = l.location_id "
+        "JOIN application a ON a.company_id = c.company_id "
+        "WHERE a.application_id = ?",
+        (application_id,),
+    ).fetchone()["city"]
+    conn.close()
+    assert hq_city == "Austin"
+
+
+def test_reassignment_does_not_leak_previous_companys_headquarters_to_shared_target(
+    client, db_path
+):
+    _post_application(
+        client,
+        company_name="Company A",
+        company_hq_city="Austin",
+        company_hq_state_province="TX",
+        company_hq_country="USA",
+    )
+    application_id = _application_id(db_path)
+    _post_application(
+        client,
+        company_name="Company B",
+        job_title="Engineer 2",
+        company_hq_city="Chicago",
+        company_hq_state_province="IL",
+        company_hq_country="USA",
+    )
+    _post_application(client, company_name="Company B", job_title="Engineer 3")
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            company_name="Company B",
+            company_hq_city="Austin",
+            company_hq_state_province="TX",
+            company_hq_country="USA",
+        ),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert 'id="shared-headquarters-warning"' not in response.data.decode()
+
+    conn = db.connect(db_path)
+    hq_city = conn.execute(
+        "SELECT l.city FROM location l JOIN company c ON c.hq_location_id = l.location_id "
+        "WHERE c.name = 'Company B'"
+    ).fetchone()["city"]
+    conn.close()
+    assert hq_city == "Chicago"
+
+
+def test_reassignment_to_new_company_does_not_silently_apply_stale_headquarters(
+    client, db_path
+):
+    _post_application(
+        client,
+        company_name="Company A",
+        company_hq_city="Austin",
+        company_hq_state_province="TX",
+        company_hq_country="USA",
+    )
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            company_name="Company C (brand new)",
+            company_hq_city="Austin",
+            company_hq_state_province="TX",
+            company_hq_country="USA",
+        ),
+    )
+
+    assert response.status_code == 302
+
+    conn = db.connect(db_path)
+    row = conn.execute(
+        "SELECT hq_location_id FROM company WHERE name = 'Company C (brand new)'"
+    ).fetchone()
+    conn.close()
+    assert row["hq_location_id"] is None
+
+
+def test_headquarters_settable_in_followup_edit_after_reassignment(client, db_path):
+    _post_application(client, company_name="Company A")
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(company_name="Company C (brand new)"),
+    )
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            company_name="Company C (brand new)",
+            company_hq_city="Denver",
+            company_hq_state_province="CO",
+            company_hq_country="USA",
+        ),
+    )
+
+    conn = db.connect(db_path)
+    hq_city = conn.execute(
+        "SELECT l.city FROM location l JOIN company c ON c.hq_location_id = l.location_id "
+        "WHERE c.name = 'Company C (brand new)'"
+    ).fetchone()["city"]
+    conn.close()
+    assert hq_city == "Denver"
+
+
+def test_reassignment_shows_informational_flash_message(client, db_path):
+    _post_application(client, company_name="Company A")
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(company_name="Company D (new)"),
+        follow_redirects=True,
+    )
+
+    assert b"Company changed" in response.data
+
+
+def test_post_edit_confirmed_shared_headquarters_change_persists_for_both_applications(
+    client, db_path
+):
+    _post_application(
+        client,
+        company_hq_city="Austin",
+        company_hq_state_province="TX",
+        company_hq_country="USA",
+    )
+    application_id = _application_id(db_path)
+    _post_application(client, job_title="Engineer 2")
+    other_application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            company_hq_city="Chicago",
+            company_hq_state_province="IL",
+            company_hq_country="USA",
+            confirm_shared_headquarters_change="1",
+        ),
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+
+    conn = db.connect(db_path)
+    for app_id in (application_id, other_application_id):
+        hq_city = conn.execute(
+            "SELECT l.city FROM location l "
+            "JOIN company c ON c.hq_location_id = l.location_id "
+            "JOIN application a ON a.company_id = c.company_id "
+            "WHERE a.application_id = ?",
+            (app_id,),
+        ).fetchone()["city"]
+        assert hq_city == "Chicago"
+    conn.close()
+
+
+def test_post_edit_database_constraint_failure_shows_generic_error(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            compensation_min="200000",
+            compensation_max="100000",
+            compensation_basis="ANNUAL",
+        ),
+    )
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in response.data.decode()
+
+
+def test_post_edit_for_nonexistent_id_returns_404(client):
+    response = client.post("/applications/999999/edit", data=_edit_form())
+
+    assert response.status_code == 404
