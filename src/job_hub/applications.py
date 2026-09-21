@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 
 WORK_ARRANGEMENTS = ("ONSITE", "HYBRID", "REMOTE")
@@ -437,6 +437,14 @@ class ApplicationListPage:
     page_size: int
     total_count: int
     record_state: str
+    search: str | None = None
+    status: list[str] = field(default_factory=list)
+    source: list[str] = field(default_factory=list)
+    work_arrangement: list[str] = field(default_factory=list)
+    employment_type: list[str] = field(default_factory=list)
+    job_location_id: int | None = None
+    date_from: date | None = None
+    date_to: date | None = None
 
     @property
     def total_pages(self):
@@ -462,10 +470,19 @@ _CURRENT_STATUS_CTE = """
     )
 """
 
-_LIST_QUERY = (
-    _CURRENT_STATUS_CTE
-    + """
-    SELECT
+# Shared FROM/JOIN and column list for both the list query and its matching
+# COUNT query, so filter conditions (which may reference joined tables, e.g.
+# status/source names) never have to be duplicated or drift between the two.
+_LIST_FROM = """
+    FROM application a
+    JOIN company c ON c.company_id = a.company_id
+    JOIN source s ON s.source_id = a.source_id
+    LEFT JOIN location l ON l.location_id = a.job_location_id
+    JOIN current_status cs ON cs.application_id = a.application_id
+    JOIN status st ON st.status_id = cs.status_id
+"""
+
+_LIST_COLUMNS = """
         a.application_id,
         c.name AS company_name,
         a.job_title,
@@ -477,30 +494,118 @@ _LIST_QUERY = (
         s.name AS source_name,
         st.name AS status_name,
         a.archived_at
-    FROM application a
-    JOIN company c ON c.company_id = a.company_id
-    JOIN source s ON s.source_id = a.source_id
-    LEFT JOIN location l ON l.location_id = a.job_location_id
-    JOIN current_status cs ON cs.application_id = a.application_id
-    JOIN status st ON st.status_id = cs.status_id
-    WHERE {record_state_where}
-    ORDER BY {order_by}
-    LIMIT ? OFFSET ?
 """
-)
 
-# Minimal FR-009 record-state visibility (Active/Archived/All), scoped ahead
-# of FR-004's full search/filter feature. Deliberately reuses the same list
-# query, sort, and pagination path per architecture.md's "Archived and All
-# record-state filters expose historical applications using the same search,
-# filter, sort, and pagination behavior" so FR-004 can extend this later
-# rather than replace it.
+# Minimal FR-009 record-state visibility (Active/Archived/All), later
+# extended by FR-004 into the full search/filter feature, reusing the same
+# list query, sort, and pagination path per architecture.md's "Archived and
+# All record-state filters expose historical applications using the same
+# search, filter, sort, and pagination behavior."
 RECORD_STATES = {
     "active": "a.archived_at IS NULL",
     "archived": "a.archived_at IS NOT NULL",
     "all": "1 = 1",
 }
 LIST_DEFAULT_RECORD_STATE = "active"
+
+
+def _escape_like(value):
+    # Escapes SQL LIKE wildcards in free-text search input so a literal "%"
+    # or "_" in the search term is matched literally rather than acting as
+    # a wildcard. Order matters: the escape character itself must be
+    # escaped first, before it's introduced by escaping "%"/"_".
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_list_where(
+    record_state,
+    search,
+    status,
+    source,
+    work_arrangement,
+    employment_type,
+    job_location_id,
+    date_from,
+    date_to,
+):
+    where_parts = [RECORD_STATES[record_state]]
+    params = []
+
+    if search:
+        # FR-004: case-insensitive substring match, OR'd across company,
+        # job title, and external job ID - a term matching any one of the
+        # three fields is enough to surface the row.
+        term = f"%{_escape_like(search)}%"
+        where_parts.append(
+            "(lower(c.name) LIKE lower(?) ESCAPE '\\' "
+            "OR lower(a.job_title) LIKE lower(?) ESCAPE '\\' "
+            "OR lower(a.external_job_id) LIKE lower(?) ESCAPE '\\')"
+        )
+        params.extend([term, term, term])
+
+    # Fixed/enumerated columns compared by exact value: filter options are
+    # always drawn from the database's own canonical stored values (a
+    # dropdown/checkbox selection, never free-text re-entry), so normalized
+    # matching isn't needed for the comparison itself. Multiple values
+    # within one category combine with OR (an IN-list); different
+    # categories combine with AND (FR-004's example).
+    for column, values in (
+        ("st.name", status),
+        ("s.name", source),
+        ("a.work_arrangement", work_arrangement),
+        ("a.employment_type", employment_type),
+    ):
+        if values:
+            placeholders = ", ".join("?" for _ in values)
+            where_parts.append(f"{column} IN ({placeholders})")
+            params.extend(values)
+
+    if job_location_id:
+        where_parts.append("a.job_location_id = ?")
+        params.append(job_location_id)
+
+    if date_from:
+        where_parts.append("a.application_date >= ?")
+        params.append(_format_date(date_from))
+
+    if date_to:
+        where_parts.append("a.application_date <= ?")
+        params.append(_format_date(date_to))
+
+    return " AND ".join(where_parts), params
+
+
+def list_source_filter_options(connection):
+    """Distinct sources currently referenced by at least one application
+    (any record state), so the filter never offers an option that can
+    never match anything - unlike status/work-arrangement/employment-type,
+    source is open-ended, free-text-created reference data that can
+    accumulate unused entries over time."""
+    rows = connection.execute(
+        "SELECT DISTINCT s.name FROM source s "
+        "JOIN application a ON a.source_id = s.source_id "
+        "ORDER BY s.name"
+    ).fetchall()
+    return [row["name"] for row in rows]
+
+
+def list_job_location_filter_options(connection):
+    """Distinct job locations currently used by at least one application
+    (any record state), identified by location_id (stable and unambiguous,
+    unlike re-parsing a formatted display string)."""
+    rows = connection.execute(
+        "SELECT DISTINCT l.location_id, l.city, l.state_province, l.country "
+        "FROM location l "
+        "JOIN application a ON a.job_location_id = l.location_id "
+        "ORDER BY l.city, l.state_province, l.country"
+    ).fetchall()
+    return [
+        (
+            row["location_id"],
+            _format_location(row["city"], row["state_province"], row["country"]),
+        )
+        for row in rows
+    ]
 
 
 def list_applications(
@@ -510,6 +615,14 @@ def list_applications(
     direction=LIST_DEFAULT_DIRECTION,
     page=1,
     record_state=LIST_DEFAULT_RECORD_STATE,
+    search=None,
+    status=None,
+    source=None,
+    work_arrangement=None,
+    employment_type=None,
+    job_location_id=None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> ApplicationListPage:
     if sort not in LIST_SORT_COLUMNS:
         sort = LIST_DEFAULT_SORT
@@ -520,10 +633,27 @@ def list_applications(
     if record_state not in RECORD_STATES:
         record_state = LIST_DEFAULT_RECORD_STATE
 
-    record_state_where = RECORD_STATES[record_state]
+    search = _trim(search) or None
+    status = list(status) if status else []
+    source = list(source) if source else []
+    work_arrangement = list(work_arrangement) if work_arrangement else []
+    employment_type = list(employment_type) if employment_type else []
+
+    where_clause, where_params = _build_list_where(
+        record_state,
+        search,
+        status,
+        source,
+        work_arrangement,
+        employment_type,
+        job_location_id,
+        date_from,
+        date_to,
+    )
 
     total_count = connection.execute(
-        f"SELECT COUNT(*) AS n FROM application a WHERE {record_state_where}"
+        _CURRENT_STATUS_CTE + f"SELECT COUNT(*) AS n {_LIST_FROM} WHERE {where_clause}",
+        where_params,
     ).fetchone()["n"]
 
     page_size = LIST_PAGE_SIZE
@@ -538,8 +668,10 @@ def list_applications(
     order_by = ", ".join(order_terms)
 
     rows = connection.execute(
-        _LIST_QUERY.format(record_state_where=record_state_where, order_by=order_by),
-        (page_size, offset),
+        _CURRENT_STATUS_CTE
+        + f"SELECT {_LIST_COLUMNS} {_LIST_FROM} WHERE {where_clause} "
+        f"ORDER BY {order_by} LIMIT ? OFFSET ?",
+        (*where_params, page_size, offset),
     ).fetchall()
 
     items = [
@@ -567,6 +699,14 @@ def list_applications(
         page_size=page_size,
         total_count=total_count,
         record_state=record_state,
+        search=search,
+        status=status,
+        source=source,
+        work_arrangement=work_arrangement,
+        employment_type=employment_type,
+        job_location_id=job_location_id,
+        date_from=date_from,
+        date_to=date_to,
     )
 
 

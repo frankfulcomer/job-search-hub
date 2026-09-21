@@ -217,6 +217,20 @@ fieldset {
     margin-top: 0.25rem;
 }
 
+#search-filter-form fieldset {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+}
+
+#search-filter-form .checkbox-option {
+    font-weight: normal;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+}
+
 #submit-application {
     padding: 0.6rem 1.2rem;
     background-color: #1f2937;

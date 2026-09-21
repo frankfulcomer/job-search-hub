@@ -9,8 +9,14 @@ from job_hub.applications import (
     COMPENSATION_BASES,
     DEFAULT_INITIAL_STATUS,
     EMPLOYMENT_TYPES,
+    LIST_DEFAULT_DIRECTION,
+    LIST_DEFAULT_RECORD_STATE,
+    LIST_DEFAULT_SORT,
+    LIST_PAGE_SIZE,
+    LIST_SORT_COLUMNS,
     RECORD_STATES,
     WORK_ARRANGEMENTS,
+    ApplicationListPage,
     LastRemainingStatusHistoryRecordError,
     LocationInput,
     PotentialDuplicateApplicationsDetected,
@@ -24,6 +30,8 @@ from job_hub.applications import (
     edit_application,
     get_application_detail,
     list_applications,
+    list_job_location_filter_options,
+    list_source_filter_options,
     restore_application,
 )
 
@@ -58,6 +66,16 @@ def _parse_effective_at(value, field="initial_status_effective_at"):
         return datetime.fromisoformat(value)
     except ValueError:
         raise ValidationError(field, "must be a valid date and time") from None
+
+
+def _parse_optional_date(value, field):
+    value = (value or "").strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise ValidationError(field, "must be a valid date") from None
 
 
 def _parse_compensation(field, value):
@@ -209,6 +227,39 @@ def new_application():
     )
 
 
+def _empty_application_list_page(
+    *,
+    sort,
+    direction,
+    record_state,
+    search,
+    status,
+    source,
+    work_arrangement,
+    employment_type,
+    job_location_id,
+    date_from,
+    date_to,
+):
+    return ApplicationListPage(
+        items=[],
+        sort=sort if sort in LIST_SORT_COLUMNS else LIST_DEFAULT_SORT,
+        direction=direction if direction in ("asc", "desc") else LIST_DEFAULT_DIRECTION,
+        page=1,
+        page_size=LIST_PAGE_SIZE,
+        total_count=0,
+        record_state=record_state if record_state in RECORD_STATES else LIST_DEFAULT_RECORD_STATE,
+        search=search,
+        status=status,
+        source=source,
+        work_arrangement=work_arrangement,
+        employment_type=employment_type,
+        job_location_id=job_location_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
 @main_bp.route("/applications")
 def application_list():
     connection = db.get_db()
@@ -221,16 +272,137 @@ def application_list():
     except ValueError:
         page = 1
 
-    result = list_applications(
-        connection,
-        sort=sort,
-        direction=direction,
-        page=page,
-        record_state=record_state,
-    )
+    search = _blank_to_none(request.args.get("q"))
+    status = request.args.getlist("status")
+    source = request.args.getlist("source")
+    work_arrangement = request.args.getlist("work_arrangement")
+    employment_type = request.args.getlist("employment_type")
+
+    job_location_raw = (request.args.get("job_location") or "").strip()
+    try:
+        job_location_id = int(job_location_raw) if job_location_raw else None
+    except ValueError:
+        job_location_id = None
+
+    date_from_raw = request.args.get("date_from", "")
+    date_to_raw = request.args.get("date_to", "")
+
+    error = None
+    error_field = None
+    date_from = None
+    date_to = None
+    try:
+        date_from = _parse_optional_date(date_from_raw, "date_from")
+        date_to = _parse_optional_date(date_to_raw, "date_to")
+        if date_from is not None and date_to is not None and date_from > date_to:
+            # Attributed to a synthetic "date_range" field, not just
+            # "date_from": the violation is a relationship between both
+            # fields, so both should be marked invalid, not just one.
+            raise ValidationError(
+                "date_range", "the beginning date must not be after the end date"
+            )
+    except ValidationError as exc:
+        error = str(exc)
+        error_field = exc.field
+
+    if error:
+        # An invalid date range can't be honestly evaluated, so no rows are
+        # shown while the error is displayed rather than silently applying
+        # only the other, valid filters. Everything else needed to render
+        # the surrounding page (sort headers, record-state nav, the filter
+        # form itself) still reflects what was actually submitted.
+        result = _empty_application_list_page(
+            sort=sort,
+            direction=direction,
+            record_state=record_state,
+            search=search,
+            status=status,
+            source=source,
+            work_arrangement=work_arrangement,
+            employment_type=employment_type,
+            job_location_id=job_location_id,
+            date_from=None,
+            date_to=None,
+        )
+    else:
+        try:
+            result = list_applications(
+                connection,
+                sort=sort,
+                direction=direction,
+                page=page,
+                record_state=record_state,
+                search=search,
+                status=status,
+                source=source,
+                work_arrangement=work_arrangement,
+                employment_type=employment_type,
+                job_location_id=job_location_id,
+                date_from=date_from,
+                date_to=date_to,
+            )
+        except OverflowError:
+            # An out-of-range job_location value (SQLite integers are
+            # 64-bit) can never match a real location either way, so it's
+            # treated the same as any other non-matching filter value -
+            # zero results, not a server error. Not surfaced as a form
+            # error like the date fields: job_location is only ever
+            # populated by selecting a real option, never free-text typed,
+            # so there's nothing for the user to "fix".
+            result = _empty_application_list_page(
+                sort=sort,
+                direction=direction,
+                record_state=record_state,
+                search=search,
+                status=status,
+                source=source,
+                work_arrangement=work_arrangement,
+                employment_type=employment_type,
+                job_location_id=None,
+                date_from=date_from,
+                date_to=date_to,
+            )
+
+    filter_args = {}
+    if result.search:
+        filter_args["q"] = result.search
+    if result.status:
+        filter_args["status"] = result.status
+    if result.source:
+        filter_args["source"] = result.source
+    if result.work_arrangement:
+        filter_args["work_arrangement"] = result.work_arrangement
+    if result.employment_type:
+        filter_args["employment_type"] = result.employment_type
+    if result.job_location_id:
+        filter_args["job_location"] = result.job_location_id
+    if result.date_from:
+        filter_args["date_from"] = result.date_from.isoformat()
+    elif error and date_from_raw:
+        # Malformed input can't round-trip through result.date_from (it's
+        # never a valid date), so the raw attempted value is carried
+        # forward instead - consistent, not silently dropped, and keeps
+        # reproducing the same validation error until it's corrected.
+        filter_args["date_from"] = date_from_raw
+    if result.date_to:
+        filter_args["date_to"] = result.date_to.isoformat()
+    elif error and date_to_raw:
+        filter_args["date_to"] = date_to_raw
 
     return render_template(
-        "applications/list.html", result=result, record_states=RECORD_STATES
+        "applications/list.html",
+        result=result,
+        record_states=RECORD_STATES,
+        error=error,
+        error_field=error_field,
+        status_options=_status_options(connection),
+        work_arrangements=WORK_ARRANGEMENTS,
+        employment_types=EMPLOYMENT_TYPES,
+        source_options=list_source_filter_options(connection),
+        job_location_options=list_job_location_filter_options(connection),
+        date_from_raw=date_from_raw,
+        date_to_raw=date_to_raw,
+        filter_args=filter_args,
     )
 
 

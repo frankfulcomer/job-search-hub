@@ -3,7 +3,13 @@ from datetime import date, datetime, timezone
 import pytest
 
 from job_hub import db
-from job_hub.applications import LocationInput, create_application, list_applications
+from job_hub.applications import (
+    LocationInput,
+    create_application,
+    list_applications,
+    list_job_location_filter_options,
+    list_source_filter_options,
+)
 
 NOW = datetime(2026, 9, 20, 15, 0, 0, tzinfo=timezone.utc)
 
@@ -23,6 +29,11 @@ def _create(connection, **overrides):
         "application_date": date(2026, 9, 20),
         "source_name": "Job Board",
         "now": NOW,
+        # Several list/filter tests deliberately reuse the same
+        # company/job-title defaults across multiple applications to
+        # isolate the filter dimension under test - not FR-002 duplicate
+        # detection, which has its own dedicated test file.
+        "confirm_duplicate": True,
     }
     fields.update(overrides)
     return create_application(connection, **fields)
@@ -314,3 +325,443 @@ def test_list_applications_archived_state_sorts_and_paginates_like_active(connec
 
     assert [item.company_name for item in result.items] == ["Co 0", "Co 1", "Co 2"]
     assert result.total_count == 3
+
+
+# --- FR-004: free-text search ---------------------------------------------
+
+
+def test_search_matches_company(connection):
+    match = _create(connection, company_name="Acme Corp")
+    _create(connection, company_name="Globex", job_title="Other")
+
+    result = list_applications(connection, search="acme")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_matches_job_title(connection):
+    match = _create(connection, job_title="Backend Engineer")
+    _create(connection, job_title="Manager")
+
+    result = list_applications(connection, search="engineer")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_matches_external_job_id(connection):
+    match = _create(connection, external_job_id="REQ-12345")
+    _create(connection, external_job_id="REQ-99999")
+
+    result = list_applications(connection, search="12345")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_is_case_insensitive(connection):
+    match = _create(connection, company_name="Acme Corp")
+
+    result = list_applications(connection, search="ACME")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_is_substring_not_prefix_only(connection):
+    match = _create(connection, company_name="The Acme Corporation")
+
+    result = list_applications(connection, search="cme corp")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_escapes_percent_wildcard(connection):
+    match = _create(connection, company_name="50% Off Staffing")
+    _create(connection, company_name="500 Staffing Co")
+
+    result = list_applications(connection, search="50%")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_escapes_underscore_wildcard(connection):
+    match = _create(connection, company_name="Acme_Staffing")
+    _create(connection, company_name="AcmeXStaffing")
+
+    result = list_applications(connection, search="acme_staffing")
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_search_no_match_returns_empty(connection):
+    _create(connection, company_name="Acme Corp")
+
+    result = list_applications(connection, search="nonexistent")
+
+    assert result.items == []
+    assert result.total_count == 0
+
+
+def test_blank_search_is_treated_as_no_search(connection):
+    _create(connection)
+
+    result = list_applications(connection, search="   ")
+
+    assert len(result.items) == 1
+    assert result.search is None
+
+
+def test_search_is_echoed_back_on_result(connection):
+    _create(connection)
+
+    result = list_applications(connection, search="  Engineer  ")
+
+    assert result.search == "Engineer"
+
+
+# --- FR-004: category filters -----------------------------------------------
+
+
+def test_status_filter_single_value(connection):
+    from job_hub.applications import change_application_status
+
+    match = _create(connection)
+    # Explicit earlier initial effective_at so the later status change below
+    # (still not in the future relative to NOW) actually becomes current.
+    other = _create(
+        connection,
+        company_name="Other Co",
+        initial_status_effective_at=datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc),
+    )
+    change_application_status(
+        connection,
+        other.application_id,
+        status_name="SCREENING",
+        effective_at=datetime(2026, 9, 20, 14, 0, tzinfo=timezone.utc),
+        now=NOW,
+    )
+
+    result = list_applications(connection, status=["APPLIED"])
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_status_filter_multiple_values_combine_with_or(connection):
+    from job_hub.applications import change_application_status
+
+    applied = _create(connection, company_name="Applied Co")
+    screening = _create(
+        connection,
+        company_name="Screening Co",
+        initial_status_effective_at=datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc),
+    )
+    offer = _create(
+        connection,
+        company_name="Offer Co",
+        initial_status_effective_at=datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc),
+    )
+    change_application_status(
+        connection,
+        screening.application_id,
+        status_name="SCREENING",
+        effective_at=datetime(2026, 9, 20, 14, 0, tzinfo=timezone.utc),
+        now=NOW,
+    )
+    change_application_status(
+        connection,
+        offer.application_id,
+        status_name="OFFER",
+        effective_at=datetime(2026, 9, 20, 14, 0, tzinfo=timezone.utc),
+        now=NOW,
+    )
+
+    result = list_applications(connection, status=["APPLIED", "SCREENING"])
+
+    assert {i.application_id for i in result.items} == {
+        applied.application_id,
+        screening.application_id,
+    }
+
+
+def test_source_filter(connection):
+    match = _create(connection, source_name="LinkedIn")
+    _create(connection, source_name="Referral")
+
+    result = list_applications(connection, source=["LinkedIn"])
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_work_arrangement_filter(connection):
+    match = _create(connection, work_arrangement="REMOTE")
+    _create(connection, work_arrangement="ONSITE")
+
+    result = list_applications(connection, work_arrangement=["REMOTE"])
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_employment_type_filter(connection):
+    match = _create(connection, employment_type="CONTRACT")
+    _create(connection, employment_type="FULL_TIME")
+
+    result = list_applications(connection, employment_type=["CONTRACT"])
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_job_location_filter(connection):
+    match = _create(
+        connection,
+        job_location=LocationInput(city="Austin", state_province="TX", country="USA"),
+    )
+    _create(
+        connection,
+        job_location=LocationInput(city="Denver", state_province="CO", country="USA"),
+    )
+
+    options = list_job_location_filter_options(connection)
+    austin_id = next(lid for lid, display in options if display == "Austin, TX, USA")
+
+    result = list_applications(connection, job_location_id=austin_id)
+
+    assert [i.application_id for i in result.items] == [match.application_id]
+
+
+def test_filter_categories_combine_with_and_and_within_category_with_or(connection):
+    # Exercises the exact worked example from FR-004: SCREENING/INTERVIEWING
+    # status OR'd together, HYBRID/REMOTE work arrangement OR'd together,
+    # the two categories AND'd together.
+    from job_hub.applications import change_application_status
+
+    initial_at = datetime(2026, 9, 20, 9, 0, tzinfo=timezone.utc)
+    match1 = _create(
+        connection,
+        company_name="Match 1",
+        work_arrangement="HYBRID",
+        initial_status_effective_at=initial_at,
+    )
+    match2 = _create(
+        connection,
+        company_name="Match 2",
+        work_arrangement="REMOTE",
+        initial_status_effective_at=initial_at,
+    )
+    wrong_status = _create(
+        connection,
+        company_name="Wrong Status",
+        work_arrangement="HYBRID",
+        initial_status_effective_at=initial_at,
+    )
+    wrong_arrangement = _create(
+        connection,
+        company_name="Wrong Arrangement",
+        work_arrangement="ONSITE",
+        initial_status_effective_at=initial_at,
+    )
+    for app_result, status_name in (
+        (match1, "SCREENING"),
+        (match2, "INTERVIEWING"),
+        (wrong_status, "OFFER"),
+        (wrong_arrangement, "SCREENING"),
+    ):
+        change_application_status(
+            connection,
+            app_result.application_id,
+            status_name=status_name,
+            effective_at=datetime(2026, 9, 20, 14, 0, tzinfo=timezone.utc),
+            now=NOW,
+        )
+
+    result = list_applications(
+        connection,
+        status=["SCREENING", "INTERVIEWING"],
+        work_arrangement=["HYBRID", "REMOTE"],
+    )
+
+    assert {i.application_id for i in result.items} == {
+        match1.application_id,
+        match2.application_id,
+    }
+
+
+def test_filters_apply_within_the_selected_record_state(connection):
+    from job_hub.applications import archive_application
+
+    active_match = _create(connection, company_name="Active Match", work_arrangement="REMOTE")
+    archived_match = _create(
+        connection, company_name="Archived Match", work_arrangement="REMOTE"
+    )
+    archive_application(connection, archived_match.application_id, now=NOW)
+
+    active_result = list_applications(connection, work_arrangement=["REMOTE"])
+    assert [i.application_id for i in active_result.items] == [active_match.application_id]
+
+    archived_result = list_applications(
+        connection, record_state="archived", work_arrangement=["REMOTE"]
+    )
+    assert [i.application_id for i in archived_result.items] == [
+        archived_match.application_id
+    ]
+
+    all_result = list_applications(
+        connection, record_state="all", work_arrangement=["REMOTE"]
+    )
+    assert {i.application_id for i in all_result.items} == {
+        active_match.application_id,
+        archived_match.application_id,
+    }
+
+
+# --- FR-004: application date range -----------------------------------------
+
+
+def _retrospective(application_date):
+    return datetime(
+        application_date.year,
+        application_date.month,
+        application_date.day,
+        9,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+
+def test_date_from_only_excludes_earlier_applications(connection):
+    early = _create(
+        connection,
+        application_date=date(2026, 9, 1),
+        initial_status_effective_at=_retrospective(date(2026, 9, 1)),
+    )
+    late = _create(connection, application_date=date(2026, 9, 20))
+
+    result = list_applications(connection, date_from=date(2026, 9, 10))
+
+    assert [i.application_id for i in result.items] == [late.application_id]
+
+
+def test_date_to_only_excludes_later_applications(connection):
+    early = _create(
+        connection,
+        application_date=date(2026, 9, 1),
+        initial_status_effective_at=_retrospective(date(2026, 9, 1)),
+    )
+    late = _create(connection, application_date=date(2026, 9, 20))
+
+    result = list_applications(connection, date_to=date(2026, 9, 10))
+
+    assert [i.application_id for i in result.items] == [early.application_id]
+
+
+def test_date_range_bounds_are_inclusive(connection):
+    # NOW is fixed at 2026-09-20; keep this window entirely in the past
+    # relative to it so no effective_at ends up rejected as "in the future".
+    on_start = _create(
+        connection,
+        application_date=date(2026, 9, 5),
+        initial_status_effective_at=_retrospective(date(2026, 9, 5)),
+    )
+    on_end = _create(
+        connection,
+        application_date=date(2026, 9, 15),
+        initial_status_effective_at=_retrospective(date(2026, 9, 15)),
+    )
+    before = _create(
+        connection,
+        application_date=date(2026, 9, 4),
+        initial_status_effective_at=_retrospective(date(2026, 9, 4)),
+    )
+    after = _create(
+        connection,
+        application_date=date(2026, 9, 16),
+        initial_status_effective_at=_retrospective(date(2026, 9, 16)),
+    )
+
+    result = list_applications(
+        connection, date_from=date(2026, 9, 5), date_to=date(2026, 9, 15)
+    )
+
+    assert {i.application_id for i in result.items} == {
+        on_start.application_id,
+        on_end.application_id,
+    }
+
+
+# --- FR-004: pagination and sorting under active filters --------------------
+
+
+def test_filtered_results_paginate_correctly(connection):
+    for i in range(30):
+        _create(connection, company_name=f"Match {i:02d}", work_arrangement="REMOTE")
+    _create(connection, company_name="Not a match", work_arrangement="ONSITE")
+
+    page1 = list_applications(connection, work_arrangement=["REMOTE"], page=1)
+    page2 = list_applications(connection, work_arrangement=["REMOTE"], page=2)
+
+    assert page1.total_count == 30
+    assert len(page1.items) == 25
+    assert len(page2.items) == 5
+
+
+def test_filtered_results_sort_correctly(connection):
+    _create(connection, company_name="Zeta Co", work_arrangement="REMOTE")
+    _create(connection, company_name="Alpha Co", work_arrangement="REMOTE")
+    _create(connection, company_name="Not a match", work_arrangement="ONSITE")
+
+    result = list_applications(
+        connection, work_arrangement=["REMOTE"], sort="company", direction="asc"
+    )
+
+    assert [i.company_name for i in result.items] == ["Alpha Co", "Zeta Co"]
+
+
+# --- FR-004: filter option helpers ------------------------------------------
+
+
+def test_list_source_filter_options_returns_distinct_used_sources(connection):
+    _create(connection, source_name="LinkedIn")
+    _create(connection, source_name="Referral")
+    _create(connection, source_name="LinkedIn")
+
+    options = list_source_filter_options(connection)
+
+    assert options == ["LinkedIn", "Referral"]
+
+
+def test_list_job_location_filter_options_returns_distinct_used_locations(connection):
+    _create(
+        connection,
+        job_location=LocationInput(city="Austin", state_province="TX", country="USA"),
+    )
+    _create(
+        connection,
+        job_location=LocationInput(city="Denver", state_province="CO", country="USA"),
+    )
+    _create(connection)  # no job location
+
+    options = list_job_location_filter_options(connection)
+
+    displays = [display for _location_id, display in options]
+    assert displays == ["Austin, TX, USA", "Denver, CO, USA"]
+
+
+# --- FR-004: filters echoed back on the result ------------------------------
+
+
+def test_active_filters_are_echoed_back_on_result(connection):
+    _create(connection, work_arrangement="REMOTE", source_name="LinkedIn")
+
+    result = list_applications(
+        connection,
+        status=["APPLIED"],
+        source=["LinkedIn"],
+        work_arrangement=["REMOTE"],
+        employment_type=["FULL_TIME"],
+        date_from=date(2026, 9, 1),
+        date_to=date(2026, 9, 30),
+    )
+
+    assert result.status == ["APPLIED"]
+    assert result.source == ["LinkedIn"]
+    assert result.work_arrangement == ["REMOTE"]
+    assert result.employment_type == ["FULL_TIME"]
+    assert result.date_from == date(2026, 9, 1)
+    assert result.date_to == date(2026, 9, 30)

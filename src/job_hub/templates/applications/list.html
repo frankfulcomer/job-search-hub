@@ -8,7 +8,7 @@
 <th scope="col"
     {%- if is_active %} aria-sort="{{ 'ascending' if result.direction == 'asc' else 'descending' }}"{% endif %}>
     <a id="sort-{{ key }}"
-       href="{{ url_for('main.application_list', state=result.record_state, sort=key, dir=next_dir, page=1) }}">{{ label }}{% if is_active %} {{ '▲' if result.direction == 'asc' else '▼' }}{% endif %}</a>
+       href="{{ url_for('main.application_list', state=result.record_state, sort=key, dir=next_dir, page=1, **filter_args) }}">{{ label }}{% if is_active %} {{ '▲' if result.direction == 'asc' else '▼' }}{% endif %}</a>
 </th>
 {% endmacro %}
 
@@ -16,11 +16,96 @@
 <section id="applications-list-page">
     <h2>Applications</h2>
 
+    {% if error %}
+    <p id="form-error" class="form-error" role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form id="search-filter-form" method="get" action="{{ url_for('main.application_list') }}">
+        <input type="hidden" name="sort" value="{{ result.sort }}">
+        <input type="hidden" name="dir" value="{{ result.direction }}">
+        <input type="hidden" name="state" value="{{ result.record_state }}">
+
+        <div class="form-field">
+            <label for="q">Search (company, job title, external job ID)</label>
+            <input type="text" id="q" name="q" value="{{ result.search or '' }}">
+        </div>
+
+        <fieldset>
+            <legend>Status</legend>
+            {% for status in status_options %}
+            <label class="checkbox-option">
+                <input type="checkbox" name="status" value="{{ status['name'] }}"
+                    {% if status['name'] in result.status %}checked{% endif %}>
+                {{ status['name'] }}
+            </label>
+            {% endfor %}
+        </fieldset>
+
+        <fieldset>
+            <legend>Source</legend>
+            {% for src in source_options %}
+            <label class="checkbox-option">
+                <input type="checkbox" name="source" value="{{ src }}"
+                    {% if src in result.source %}checked{% endif %}>
+                {{ src }}
+            </label>
+            {% endfor %}
+        </fieldset>
+
+        <fieldset>
+            <legend>Work arrangement</legend>
+            {% for wa in work_arrangements %}
+            <label class="checkbox-option">
+                <input type="checkbox" name="work_arrangement" value="{{ wa }}"
+                    {% if wa in result.work_arrangement %}checked{% endif %}>
+                {{ wa }}
+            </label>
+            {% endfor %}
+        </fieldset>
+
+        <fieldset>
+            <legend>Employment type</legend>
+            {% for et in employment_types %}
+            <label class="checkbox-option">
+                <input type="checkbox" name="employment_type" value="{{ et }}"
+                    {% if et in result.employment_type %}checked{% endif %}>
+                {{ et }}
+            </label>
+            {% endfor %}
+        </fieldset>
+
+        <div class="form-field">
+            <label for="job_location">Job location</label>
+            <select id="job_location" name="job_location">
+                <option value="">Any location</option>
+                {% for location_id, display in job_location_options %}
+                <option value="{{ location_id }}"
+                    {% if result.job_location_id == location_id %}selected{% endif %}>{{ display }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-field">
+            <label for="date_from">Application date from</label>
+            <input type="date" id="date_from" name="date_from" value="{{ date_from_raw }}"
+                   {% if error_field in ('date_from', 'date_range') %}aria-invalid="true"{% endif %}>
+        </div>
+
+        <div class="form-field">
+            <label for="date_to">Application date to</label>
+            <input type="date" id="date_to" name="date_to" value="{{ date_to_raw }}"
+                   {% if error_field in ('date_to', 'date_range') %}aria-invalid="true"{% endif %}>
+        </div>
+
+        <button type="submit" id="apply-filters">Apply filters</button>
+        <a id="clear-filters" href="{{ url_for('main.application_list') }}">Clear filters</a>
+    </form>
+
     <nav id="record-state-filter" aria-label="Filter by record state">
         {% for state in record_states %}
         <a id="record-state-{{ state }}"
            {% if result.record_state == state %}aria-current="true"{% endif %}
-           href="{{ url_for('main.application_list', state=state, sort=result.sort, dir=result.direction, page=1) }}">{{ state | capitalize }}</a>{% if not loop.last %} &middot; {% endif %}
+           href="{{ url_for('main.application_list', state=state, sort=result.sort, dir=result.direction, page=1, **filter_args) }}">{{ state | capitalize }}</a>{% if not loop.last %} &middot; {% endif %}
         {% endfor %}
     </nav>
 
@@ -75,20 +160,23 @@
     <nav id="pagination" aria-label="Applications pagination">
         {% if result.page > 1 %}
         <a id="page-prev"
-           href="{{ url_for('main.application_list', state=result.record_state, sort=result.sort, dir=result.direction, page=result.page - 1) }}">Previous</a>
+           href="{{ url_for('main.application_list', state=result.record_state, sort=result.sort, dir=result.direction, page=result.page - 1, **filter_args) }}">Previous</a>
         {% endif %}
         <span id="page-indicator">Page {{ result.page }} of {{ result.total_pages }}</span>
         {% if result.page < result.total_pages %}
         <a id="page-next"
-           href="{{ url_for('main.application_list', state=result.record_state, sort=result.sort, dir=result.direction, page=result.page + 1) }}">Next</a>
+           href="{{ url_for('main.application_list', state=result.record_state, sort=result.sort, dir=result.direction, page=result.page + 1, **filter_args) }}">Next</a>
         {% endif %}
     </nav>
     {% endif %}
 
     {% else %}
     <p id="applications-empty-state">
-        {% if result.record_state == 'archived' %}No archived applications.
-        {% elif result.record_state == 'all' %}No applications have been recorded yet.
+        {% if error %}
+        {# The error banner above already explains the problem; avoid a
+           second, potentially confusing "no results" message on top of it. #}
+        {% elif filter_args %}No applications match the current search and filter criteria.
+        {% elif result.record_state == 'archived' %}No archived applications.
         {% else %}No applications have been recorded yet.
         {% endif %}
     </p>
