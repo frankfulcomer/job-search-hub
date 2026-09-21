@@ -109,6 +109,46 @@ body {
     font-weight: 600;
 }
 
+.inline-form {
+    display: inline;
+}
+
+.inline-form button {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #1d4ed8;
+    text-decoration: underline;
+    cursor: pointer;
+    font: inherit;
+}
+
+#applications-table tr.archived-row {
+    color: #6b7280;
+}
+
+.archived-badge {
+    font-weight: 600;
+    color: #6b7280;
+}
+
+#detail-archived-notice {
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    background-color: #f3f4f6;
+    color: #374151;
+    font-weight: 600;
+}
+
+#record-state-filter {
+    margin-bottom: 1rem;
+}
+
+#record-state-filter a[aria-current="true"] {
+    font-weight: 600;
+    text-decoration: none;
+}
+
 .flash {
     padding: 0.75rem 1rem;
     border-radius: 4px;

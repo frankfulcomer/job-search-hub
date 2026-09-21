@@ -8,7 +8,7 @@
 <th scope="col"
     {%- if is_active %} aria-sort="{{ 'ascending' if result.direction == 'asc' else 'descending' }}"{% endif %}>
     <a id="sort-{{ key }}"
-       href="{{ url_for('main.application_list', sort=key, dir=next_dir, page=1) }}">{{ label }}{% if is_active %} {{ '▲' if result.direction == 'asc' else '▼' }}{% endif %}</a>
+       href="{{ url_for('main.application_list', state=result.record_state, sort=key, dir=next_dir, page=1) }}">{{ label }}{% if is_active %} {{ '▲' if result.direction == 'asc' else '▼' }}{% endif %}</a>
 </th>
 {% endmacro %}
 
@@ -16,7 +16,16 @@
 <section id="applications-list-page">
     <h2>Applications</h2>
 
+    <nav id="record-state-filter" aria-label="Filter by record state">
+        {% for state in record_states %}
+        <a id="record-state-{{ state }}"
+           {% if result.record_state == state %}aria-current="true"{% endif %}
+           href="{{ url_for('main.application_list', state=state, sort=result.sort, dir=result.direction, page=1) }}">{{ state | capitalize }}</a>{% if not loop.last %} &middot; {% endif %}
+        {% endfor %}
+    </nav>
+
     {% if result.items %}
+    {% set show_actions = result.record_state in ('archived', 'all') %}
     <table id="applications-table">
         <thead>
             <tr>
@@ -27,21 +36,36 @@
                 {{ sort_header('application_date', 'Application date') }}
                 {{ sort_header('status', 'Current status') }}
                 {{ sort_header('source', 'Source') }}
+                {% if show_actions %}
+                <th scope="col">Actions</th>
+                {% endif %}
             </tr>
         </thead>
         <tbody>
             {% for item in result.items %}
-            <tr id="application-row-{{ item.application_id }}">
+            <tr id="application-row-{{ item.application_id }}"
+                {% if item.is_archived %}class="archived-row"{% endif %}>
                 <td>{{ item.company_name }}</td>
                 <td>
                     <a id="view-application-{{ item.application_id }}"
                        href="{{ url_for('main.application_detail', application_id=item.application_id) }}">{{ item.job_title }}</a>
+                    {%- if item.is_archived %} <span class="archived-badge">(archived)</span>{% endif %}
                 </td>
                 <td>{{ item.job_location_display or '—' }}</td>
                 <td>{{ item.work_arrangement or '—' }}</td>
                 <td>{{ item.application_date }}</td>
                 <td>{{ item.status_name }}</td>
                 <td>{{ item.source_name }}</td>
+                {% if show_actions %}
+                <td>
+                    {% if item.is_archived %}
+                    <form class="inline-form" method="post"
+                          action="{{ url_for('main.application_restore', application_id=item.application_id) }}">
+                        <button type="submit" id="restore-application-{{ item.application_id }}">Restore</button>
+                    </form>
+                    {% endif %}
+                </td>
+                {% endif %}
             </tr>
             {% endfor %}
         </tbody>
@@ -51,18 +75,23 @@
     <nav id="pagination" aria-label="Applications pagination">
         {% if result.page > 1 %}
         <a id="page-prev"
-           href="{{ url_for('main.application_list', sort=result.sort, dir=result.direction, page=result.page - 1) }}">Previous</a>
+           href="{{ url_for('main.application_list', state=result.record_state, sort=result.sort, dir=result.direction, page=result.page - 1) }}">Previous</a>
         {% endif %}
         <span id="page-indicator">Page {{ result.page }} of {{ result.total_pages }}</span>
         {% if result.page < result.total_pages %}
         <a id="page-next"
-           href="{{ url_for('main.application_list', sort=result.sort, dir=result.direction, page=result.page + 1) }}">Next</a>
+           href="{{ url_for('main.application_list', state=result.record_state, sort=result.sort, dir=result.direction, page=result.page + 1) }}">Next</a>
         {% endif %}
     </nav>
     {% endif %}
 
     {% else %}
-    <p id="applications-empty-state">No applications have been recorded yet.</p>
+    <p id="applications-empty-state">
+        {% if result.record_state == 'archived' %}No archived applications.
+        {% elif result.record_state == 'all' %}No applications have been recorded yet.
+        {% else %}No applications have been recorded yet.
+        {% endif %}
+    </p>
     {% endif %}
 </section>
 {% endblock %}

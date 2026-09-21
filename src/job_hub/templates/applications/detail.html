@@ -6,12 +6,26 @@
 <section id="application-detail-page">
     <p><a href="{{ url_for('main.application_list') }}">Back to Applications</a></p>
     <h2>{{ detail.job_title }} at {{ detail.company_name }}</h2>
+    {% if detail.is_archived %}
+    <p id="detail-archived-notice">This application is archived.</p>
+    {% endif %}
+
     <p>
         <a id="edit-application-link"
            href="{{ url_for('main.application_edit', application_id=detail.application_id) }}">Edit Application</a>
         &middot;
         <a id="change-status-link"
            href="{{ url_for('main.application_status_change', application_id=detail.application_id) }}">Change Status</a>
+        &middot;
+        {% if detail.is_archived %}
+        <form id="restore-application-form" class="inline-form" method="post"
+              action="{{ url_for('main.application_restore', application_id=detail.application_id) }}">
+            <button type="submit" id="restore-application-link">Restore Application</button>
+        </form>
+        {% else %}
+        <a id="archive-application-link"
+           href="{{ url_for('main.application_archive', application_id=detail.application_id) }}">Archive Application</a>
+        {% endif %}
     </p>
 
     <section id="application-section">

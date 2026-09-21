@@ -239,3 +239,78 @@ def test_list_applications_excludes_archived_applications(connection):
 
     assert listed.items == []
     assert listed.total_count == 0
+
+
+def _archive(connection, application_id, archived_at="2026-09-20T12:00:00.000Z"):
+    connection.execute(
+        "UPDATE application SET archived_at = ? WHERE application_id = ?",
+        (archived_at, application_id),
+    )
+    connection.commit()
+
+
+def test_list_applications_default_record_state_is_active(connection):
+    result = list_applications(connection)
+
+    assert result.record_state == "active"
+
+
+def test_list_applications_record_state_archived_returns_only_archived(connection):
+    active = _create(connection, company_name="Active Co")
+    archived = _create(connection, company_name="Archived Co")
+    _archive(connection, archived.application_id)
+
+    result = list_applications(connection, record_state="archived")
+
+    assert [item.application_id for item in result.items] == [archived.application_id]
+    assert result.record_state == "archived"
+
+
+def test_list_applications_record_state_all_returns_both(connection):
+    active = _create(connection, company_name="Active Co")
+    archived = _create(connection, company_name="Archived Co")
+    _archive(connection, archived.application_id)
+
+    result = list_applications(connection, record_state="all")
+
+    assert {item.application_id for item in result.items} == {
+        active.application_id,
+        archived.application_id,
+    }
+    assert result.record_state == "all"
+
+
+def test_list_applications_all_marks_archived_items(connection):
+    active = _create(connection, company_name="Active Co")
+    archived = _create(connection, company_name="Archived Co")
+    _archive(connection, archived.application_id)
+
+    result = list_applications(connection, record_state="all")
+
+    flags = {item.application_id: item.is_archived for item in result.items}
+    assert flags[active.application_id] is False
+    assert flags[archived.application_id] is True
+
+
+def test_list_applications_unrecognized_record_state_falls_back_to_active(connection):
+    active = _create(connection, company_name="Active Co")
+    archived = _create(connection, company_name="Archived Co")
+    _archive(connection, archived.application_id)
+
+    result = list_applications(connection, record_state="not-a-real-state")
+
+    assert [item.application_id for item in result.items] == [active.application_id]
+    assert result.record_state == "active"
+
+
+def test_list_applications_archived_state_sorts_and_paginates_like_active(connection):
+    for i in range(3):
+        result = _create(connection, company_name=f"Co {i}")
+        _archive(connection, result.application_id, f"2026-09-{18 + i}T12:00:00.000Z")
+
+    result = list_applications(
+        connection, record_state="archived", sort="company", direction="asc"
+    )
+
+    assert [item.company_name for item in result.items] == ["Co 0", "Co 1", "Co 2"]
+    assert result.total_count == 3

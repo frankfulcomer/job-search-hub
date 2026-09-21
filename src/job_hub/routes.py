@@ -9,11 +9,13 @@ from job_hub.applications import (
     COMPENSATION_BASES,
     DEFAULT_INITIAL_STATUS,
     EMPLOYMENT_TYPES,
+    RECORD_STATES,
     WORK_ARRANGEMENTS,
     LastRemainingStatusHistoryRecordError,
     LocationInput,
     SharedHeadquartersChangeRequiresConfirmation,
     ValidationError,
+    archive_application,
     change_application_status,
     correct_status_history,
     create_application,
@@ -21,6 +23,7 @@ from job_hub.applications import (
     edit_application,
     get_application_detail,
     list_applications,
+    restore_application,
 )
 
 main_bp = Blueprint("main", __name__)
@@ -206,14 +209,23 @@ def application_list():
 
     sort = request.args.get("sort", "")
     direction = request.args.get("dir", "")
+    record_state = request.args.get("state", "")
     try:
         page = int(request.args.get("page", 1))
     except ValueError:
         page = 1
 
-    result = list_applications(connection, sort=sort, direction=direction, page=page)
+    result = list_applications(
+        connection,
+        sort=sort,
+        direction=direction,
+        page=page,
+        record_state=record_state,
+    )
 
-    return render_template("applications/list.html", result=result)
+    return render_template(
+        "applications/list.html", result=result, record_states=RECORD_STATES
+    )
 
 
 @main_bp.route("/applications/<int:application_id>")
@@ -465,3 +477,49 @@ def application_status_delete(application_id, history_id):
         is_only_entry=is_only_entry,
         error=error,
     )
+
+
+@main_bp.route("/applications/<int:application_id>/archive", methods=["GET", "POST"])
+def application_archive(application_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        detail = None
+    if detail is None:
+        abort(404)
+
+    if request.method == "POST":
+        archive_application(connection, application_id)
+        flash(
+            f"Archived application for {detail.job_title} at "
+            f"{detail.company_name}.",
+            "success",
+        )
+        return redirect(
+            url_for("main.application_detail", application_id=application_id)
+        )
+
+    return render_template(
+        "applications/archive_confirm.html",
+        application_id=application_id,
+        detail=detail,
+    )
+
+
+@main_bp.route("/applications/<int:application_id>/restore", methods=["POST"])
+def application_restore(application_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        detail = None
+    if detail is None:
+        abort(404)
+
+    restore_application(connection, application_id)
+    flash(
+        f"Restored application for {detail.job_title} at {detail.company_name}.",
+        "success",
+    )
+    return redirect(url_for("main.application_detail", application_id=application_id))

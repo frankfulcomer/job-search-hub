@@ -327,6 +327,7 @@ class ApplicationListItem:
     application_date: str
     source_name: str
     status_name: str
+    archived_at: str | None
 
     @property
     def job_location_display(self):
@@ -335,6 +336,10 @@ class ApplicationListItem:
             self.job_location_state_province,
             self.job_location_country,
         )
+
+    @property
+    def is_archived(self):
+        return self.archived_at is not None
 
 
 @dataclass
@@ -345,6 +350,7 @@ class ApplicationListPage:
     page: int
     page_size: int
     total_count: int
+    record_state: str
 
     @property
     def total_pages(self):
@@ -375,17 +381,31 @@ _LIST_QUERY = """
         a.work_arrangement,
         a.application_date,
         s.name AS source_name,
-        st.name AS status_name
+        st.name AS status_name,
+        a.archived_at
     FROM application a
     JOIN company c ON c.company_id = a.company_id
     JOIN source s ON s.source_id = a.source_id
     LEFT JOIN location l ON l.location_id = a.job_location_id
     JOIN current_status cs ON cs.application_id = a.application_id
     JOIN status st ON st.status_id = cs.status_id
-    WHERE a.archived_at IS NULL
+    WHERE {record_state_where}
     ORDER BY {order_by}
     LIMIT ? OFFSET ?
 """
+
+# Minimal FR-009 record-state visibility (Active/Archived/All), scoped ahead
+# of FR-004's full search/filter feature. Deliberately reuses the same list
+# query, sort, and pagination path per architecture.md's "Archived and All
+# record-state filters expose historical applications using the same search,
+# filter, sort, and pagination behavior" so FR-004 can extend this later
+# rather than replace it.
+RECORD_STATES = {
+    "active": "a.archived_at IS NULL",
+    "archived": "a.archived_at IS NOT NULL",
+    "all": "1 = 1",
+}
+LIST_DEFAULT_RECORD_STATE = "active"
 
 
 def list_applications(
@@ -394,6 +414,7 @@ def list_applications(
     sort=LIST_DEFAULT_SORT,
     direction=LIST_DEFAULT_DIRECTION,
     page=1,
+    record_state=LIST_DEFAULT_RECORD_STATE,
 ) -> ApplicationListPage:
     if sort not in LIST_SORT_COLUMNS:
         sort = LIST_DEFAULT_SORT
@@ -401,9 +422,13 @@ def list_applications(
         direction = LIST_DEFAULT_DIRECTION
     if not isinstance(page, int) or page < 1:
         page = 1
+    if record_state not in RECORD_STATES:
+        record_state = LIST_DEFAULT_RECORD_STATE
+
+    record_state_where = RECORD_STATES[record_state]
 
     total_count = connection.execute(
-        "SELECT COUNT(*) AS n FROM application WHERE archived_at IS NULL"
+        f"SELECT COUNT(*) AS n FROM application a WHERE {record_state_where}"
     ).fetchone()["n"]
 
     page_size = LIST_PAGE_SIZE
@@ -418,7 +443,8 @@ def list_applications(
     order_by = ", ".join(order_terms)
 
     rows = connection.execute(
-        _LIST_QUERY.format(order_by=order_by), (page_size, offset)
+        _LIST_QUERY.format(record_state_where=record_state_where, order_by=order_by),
+        (page_size, offset),
     ).fetchall()
 
     items = [
@@ -433,6 +459,7 @@ def list_applications(
             application_date=row["application_date"],
             source_name=row["source_name"],
             status_name=row["status_name"],
+            archived_at=row["archived_at"],
         )
         for row in rows
     ]
@@ -444,6 +471,7 @@ def list_applications(
         page=page,
         page_size=page_size,
         total_count=total_count,
+        record_state=record_state,
     )
 
 
@@ -478,7 +506,12 @@ class ApplicationDetail:
     company_hq_city: str | None
     company_hq_state_province: str | None
     company_hq_country: str | None
+    archived_at: str | None
     status_history: list[StatusHistoryEntry]
+
+    @property
+    def is_archived(self):
+        return self.archived_at is not None
 
     @property
     def job_location_display(self):
@@ -541,7 +574,8 @@ _DETAIL_QUERY = """
         jl.country AS job_location_country,
         hql.city AS company_hq_city,
         hql.state_province AS company_hq_state_province,
-        hql.country AS company_hq_country
+        hql.country AS company_hq_country,
+        a.archived_at
     FROM application a
     JOIN company c ON c.company_id = a.company_id
     JOIN source s ON s.source_id = a.source_id
@@ -605,6 +639,7 @@ def get_application_detail(connection, application_id) -> ApplicationDetail | No
         company_hq_city=row["company_hq_city"],
         company_hq_state_province=row["company_hq_state_province"],
         company_hq_country=row["company_hq_country"],
+        archived_at=row["archived_at"],
         status_history=history,
     )
 
@@ -994,3 +1029,77 @@ def delete_status_history(
     return DeleteStatusHistoryResult(
         application_id=application_id, deleted_history_id=history_id
     )
+
+
+@dataclass
+class ArchiveApplicationResult:
+    application_id: int
+
+
+def archive_application(
+    connection, application_id, now: datetime | None = None
+) -> ArchiveApplicationResult | None:
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    existing = connection.execute(
+        "SELECT application_id FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    if existing is None:
+        return None
+
+    try:
+        # Only set archived_at when currently unset, so archiving an
+        # already-archived application is a true no-op (preserves the
+        # original archive time and leaves last_updated_at untouched via
+        # the existing no-op-safe trigger) rather than repeatedly bumping it.
+        connection.execute(
+            """
+            UPDATE application
+               SET archived_at = ?
+             WHERE application_id = ? AND archived_at IS NULL
+            """,
+            (_format_timestamp(now), application_id),
+        )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return ArchiveApplicationResult(application_id=application_id)
+
+
+@dataclass
+class RestoreApplicationResult:
+    application_id: int
+
+
+def restore_application(connection, application_id) -> RestoreApplicationResult | None:
+    existing = connection.execute(
+        "SELECT application_id FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    if existing is None:
+        return None
+
+    try:
+        # Only clear archived_at when currently set, so restoring an
+        # already-active application is a true no-op.
+        connection.execute(
+            """
+            UPDATE application
+               SET archived_at = NULL
+             WHERE application_id = ? AND archived_at IS NOT NULL
+            """,
+            (application_id,),
+        )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return RestoreApplicationResult(application_id=application_id)
