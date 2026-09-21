@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Job Hub - Delete Status History Entry{% endblock %}
+
+{% block content %}
+<section id="status-delete-page">
+    <p><a href="{{ url_for('main.application_detail', application_id=application_id) }}">Back to Application</a></p>
+    <h2>Delete Status History Entry: {{ detail.job_title }} at {{ detail.company_name }}</h2>
+
+    {% if error %}
+    <p id="form-error" class="form-error" role="alert">{{ error }}</p>
+    {% endif %}
+
+    <dl>
+        <dt>Status</dt>
+        <dd id="status-delete-status-name">{{ entry.status_name }}</dd>
+
+        <dt>Effective</dt>
+        <dd id="status-delete-effective-at">{{ entry.effective_at }}</dd>
+
+        <dt>Notes</dt>
+        <dd id="status-delete-notes">{{ entry.notes or '—' }}</dd>
+    </dl>
+
+    {% if is_only_entry %}
+    <p id="status-delete-blocked">
+        This is the only status history record for this application and cannot be deleted.
+    </p>
+    <a id="cancel-status-delete"
+       href="{{ url_for('main.application_detail', application_id=application_id) }}">Back to Application</a>
+    {% else %}
+    <p>Are you sure you want to delete this status history entry? This cannot be undone.</p>
+    <form id="status-delete-form" method="post"
+          action="{{ url_for('main.application_status_delete', application_id=application_id, history_id=history_id) }}">
+        <button type="submit" id="confirm-status-delete">Delete entry</button>
+        <a id="cancel-status-delete"
+           href="{{ url_for('main.application_detail', application_id=application_id) }}">Cancel</a>
+    </form>
+    {% endif %}
+</section>
+{% endblock %}

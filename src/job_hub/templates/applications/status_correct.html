@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% import "applications/_form_macros.html" as forms with context %}
+
+{% block title %}Job Hub - Correct Status History{% endblock %}
+
+{% block content %}
+<section id="status-correct-page">
+    <p><a href="{{ url_for('main.application_detail', application_id=application_id) }}">Back to Application</a></p>
+    <h2>Correct Status History: {{ detail.job_title }} at {{ detail.company_name }}</h2>
+
+    {% if error %}
+    <p id="form-error" class="form-error" role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form id="status-correct-form" method="post"
+          action="{{ url_for('main.application_status_correct', application_id=application_id, history_id=history_id) }}">
+        <div class="form-field">
+            <label for="status_name">Status</label>
+            <select id="status_name" name="status_name" required {{ forms.invalid('status_name') }}>
+                <option value="" {% if not form_data.get('status_name') %}selected{% endif %}>-- Select a status --</option>
+                {% for status in status_options %}
+                <option value="{{ status['name'] }}"
+                    {% if form_data.get('status_name') == status['name'] %}selected{% endif %}>{{ status['name'] }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-field">
+            <label for="effective_at">Status effective date/time</label>
+            <input type="datetime-local" id="effective_at" name="effective_at" required
+                   {{ forms.invalid('effective_at') }}
+                   value="{{ form_data.get('effective_at', '') }}">
+        </div>
+
+        <div class="form-field">
+            <label for="notes">Notes (optional)</label>
+            <textarea id="notes" name="notes" rows="3">{{ form_data.get('notes', '') }}</textarea>
+        </div>
+
+        <button type="submit" id="submit-status-correct">Save correction</button>
+        <a id="cancel-status-correct"
+           href="{{ url_for('main.application_detail', application_id=application_id) }}">Cancel</a>
+    </form>
+</section>
+{% endblock %}

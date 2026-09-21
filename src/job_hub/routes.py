@@ -10,11 +10,14 @@ from job_hub.applications import (
     DEFAULT_INITIAL_STATUS,
     EMPLOYMENT_TYPES,
     WORK_ARRANGEMENTS,
+    LastRemainingStatusHistoryRecordError,
     LocationInput,
     SharedHeadquartersChangeRequiresConfirmation,
     ValidationError,
     change_application_status,
+    correct_status_history,
     create_application,
+    delete_status_history,
     edit_application,
     get_application_detail,
     list_applications,
@@ -148,6 +151,13 @@ def _status_options(connection):
     return connection.execute(
         "SELECT name FROM status ORDER BY display_order"
     ).fetchall()
+
+
+def _find_history_entry(detail, history_id):
+    for entry in detail.status_history:
+        if entry.application_status_history_id == history_id:
+            return entry
+    return None
 
 
 @main_bp.route("/applications/new", methods=["GET", "POST"])
@@ -335,4 +345,123 @@ def application_status_change(application_id):
         error_field=error_field,
         form_data=form_data,
         status_options=_status_options(connection),
+    )
+
+
+@main_bp.route(
+    "/applications/<int:application_id>/status/<int:history_id>/edit",
+    methods=["GET", "POST"],
+)
+def application_status_correct(application_id, history_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        detail = None
+    if detail is None:
+        abort(404)
+
+    entry = _find_history_entry(detail, history_id)
+    if entry is None:
+        abort(404)
+
+    error = None
+    error_field = None
+    form_data = {
+        "status_name": entry.status_name,
+        "effective_at": entry.effective_at[:16],
+        "notes": entry.notes or "",
+    }
+
+    if request.method == "POST":
+        form_data = request.form
+        try:
+            status_name = form_data.get("status_name", "")
+            effective_at = _parse_effective_at(
+                form_data.get("effective_at"), field="effective_at"
+            )
+            notes = _blank_to_none(form_data.get("notes"))
+            correct_status_history(
+                connection,
+                application_id,
+                history_id,
+                status_name=status_name,
+                effective_at=effective_at,
+                notes=notes,
+            )
+            flash(
+                f"Corrected status history entry to {status_name.strip()} for "
+                f"{detail.job_title} at {detail.company_name}.",
+                "success",
+            )
+            return redirect(
+                url_for("main.application_detail", application_id=application_id)
+            )
+        except ValidationError as exc:
+            error = str(exc)
+            error_field = exc.field
+        except sqlite3.IntegrityError:
+            error = (
+                "This correction could not be saved because another status "
+                "change already has the same effective date and time. Please "
+                "choose a different date and time."
+            )
+
+    return render_template(
+        "applications/status_correct.html",
+        application_id=application_id,
+        history_id=history_id,
+        detail=detail,
+        error=error,
+        error_field=error_field,
+        form_data=form_data,
+        status_options=_status_options(connection),
+    )
+
+
+@main_bp.route(
+    "/applications/<int:application_id>/status/<int:history_id>/delete",
+    methods=["GET", "POST"],
+)
+def application_status_delete(application_id, history_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        detail = None
+    if detail is None:
+        abort(404)
+
+    entry = _find_history_entry(detail, history_id)
+    if entry is None:
+        abort(404)
+
+    is_only_entry = len(detail.status_history) <= 1
+    error = None
+
+    if request.method == "POST":
+        try:
+            delete_status_history(connection, application_id, history_id)
+            flash(
+                f"Deleted status history entry ({entry.status_name}) for "
+                f"{detail.job_title} at {detail.company_name}.",
+                "success",
+            )
+            return redirect(
+                url_for("main.application_detail", application_id=application_id)
+            )
+        except LastRemainingStatusHistoryRecordError:
+            error = (
+                "This is the only status history record for this application "
+                "and cannot be deleted."
+            )
+
+    return render_template(
+        "applications/status_delete.html",
+        application_id=application_id,
+        history_id=history_id,
+        detail=detail,
+        entry=entry,
+        is_only_entry=is_only_entry,
+        error=error,
     )

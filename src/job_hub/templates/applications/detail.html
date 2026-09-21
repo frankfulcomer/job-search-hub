@@ -102,6 +102,7 @@
                     <th scope="col">Status</th>
                     <th scope="col">Effective</th>
                     <th scope="col">Notes</th>
+                    <th scope="col">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -114,6 +115,15 @@
                     </td>
                     <td>{{ entry.effective_at }}</td>
                     <td>{{ entry.notes or '—' }}</td>
+                    <td>
+                        <a id="correct-status-history-{{ entry.application_status_history_id }}"
+                           href="{{ url_for('main.application_status_correct', application_id=detail.application_id, history_id=entry.application_status_history_id) }}">Correct</a>
+                        {% if detail.status_history|length > 1 %}
+                        &middot;
+                        <a id="delete-status-history-{{ entry.application_status_history_id }}"
+                           href="{{ url_for('main.application_status_delete', application_id=detail.application_id, history_id=entry.application_status_history_id) }}">Delete</a>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>

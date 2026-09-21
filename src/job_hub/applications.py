@@ -883,3 +883,114 @@ def change_application_status(
         status_id=status_id,
         status_history_id=status_history_id,
     )
+
+
+class LastRemainingStatusHistoryRecordError(Exception):
+    """Raised when attempting to delete an application's only remaining
+    status-history record. FR-008: every application must always retain at
+    least one."""
+
+    def __init__(self, application_id):
+        super().__init__(
+            f"Cannot delete the only remaining status history record for "
+            f"application {application_id}"
+        )
+        self.application_id = application_id
+
+
+def _get_status_history_entry(connection, application_id, history_id):
+    return connection.execute(
+        "SELECT application_status_history_id FROM application_status_history "
+        "WHERE application_status_history_id = ? AND application_id = ?",
+        (history_id, application_id),
+    ).fetchone()
+
+
+@dataclass
+class CorrectStatusHistoryResult:
+    application_id: int
+    application_status_history_id: int
+    status_id: int
+
+
+def correct_status_history(
+    connection,
+    application_id,
+    history_id,
+    *,
+    status_name,
+    effective_at: datetime | None = None,
+    notes=None,
+    now: datetime | None = None,
+) -> CorrectStatusHistoryResult | None:
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    if _get_status_history_entry(connection, application_id, history_id) is None:
+        return None
+
+    status_name = _require_text("status_name", status_name)
+    if effective_at is None:
+        raise ValidationError("effective_at", "is required")
+    effective_at = _reject_future_effective_at("effective_at", effective_at, now)
+
+    try:
+        status_id = _resolve_status_id(connection, status_name, field="status_name")
+
+        connection.execute(
+            """
+            UPDATE application_status_history
+               SET status_id = ?, effective_at = ?, notes = ?
+             WHERE application_status_history_id = ?
+            """,
+            (status_id, _format_timestamp(effective_at), notes, history_id),
+        )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return CorrectStatusHistoryResult(
+        application_id=application_id,
+        application_status_history_id=history_id,
+        status_id=status_id,
+    )
+
+
+@dataclass
+class DeleteStatusHistoryResult:
+    application_id: int
+    deleted_history_id: int
+
+
+def delete_status_history(
+    connection, application_id, history_id
+) -> DeleteStatusHistoryResult | None:
+    if _get_status_history_entry(connection, application_id, history_id) is None:
+        return None
+
+    try:
+        remaining_count = connection.execute(
+            "SELECT COUNT(*) AS n FROM application_status_history "
+            "WHERE application_id = ?",
+            (application_id,),
+        ).fetchone()["n"]
+        if remaining_count <= 1:
+            raise LastRemainingStatusHistoryRecordError(application_id)
+
+        connection.execute(
+            "DELETE FROM application_status_history "
+            "WHERE application_status_history_id = ?",
+            (history_id,),
+        )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return DeleteStatusHistoryResult(
+        application_id=application_id, deleted_history_id=history_id
+    )
