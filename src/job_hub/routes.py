@@ -13,6 +13,7 @@ from job_hub.applications import (
     WORK_ARRANGEMENTS,
     LastRemainingStatusHistoryRecordError,
     LocationInput,
+    PotentialDuplicateApplicationsDetected,
     SharedHeadquartersChangeRequiresConfirmation,
     ValidationError,
     archive_application,
@@ -112,6 +113,7 @@ def _parse_application_form(form):
     fields["initial_status_effective_at"] = _parse_effective_at(
         form.get("initial_status_effective_at")
     )
+    fields["confirm_duplicate"] = form.get("confirm_duplicate") == "1"
     return fields
 
 
@@ -169,6 +171,7 @@ def new_application():
     error = None
     error_field = None
     form_data = {}
+    duplicate_matches = None
 
     if request.method == "POST":
         form_data = request.form
@@ -181,6 +184,8 @@ def new_application():
                 "success",
             )
             return redirect(url_for("main.application_list"))
+        except PotentialDuplicateApplicationsDetected as exc:
+            duplicate_matches = exc.matches
         except ValidationError as exc:
             error = str(exc)
             error_field = exc.field
@@ -195,6 +200,7 @@ def new_application():
         error=error,
         error_field=error_field,
         form_data=form_data,
+        duplicate_matches=duplicate_matches,
         status_options=_status_options(connection),
         work_arrangements=WORK_ARRANGEMENTS,
         employment_types=EMPLOYMENT_TYPES,

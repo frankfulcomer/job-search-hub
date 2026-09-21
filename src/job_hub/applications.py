@@ -166,6 +166,84 @@ def _resolve_initial_effective_at(
     )
 
 
+@dataclass
+class PotentialDuplicateMatch:
+    application_id: int
+    company_name: str
+    job_title: str
+    application_date: str
+    current_status_name: str | None
+    is_archived: bool
+
+
+class PotentialDuplicateApplicationsDetected(Exception):
+    """Raised during application entry (FR-002) when an application appears
+    to already exist for the same company. A warning, not a database
+    uniqueness restriction (architecture.md); the caller decides whether to
+    proceed."""
+
+    def __init__(self, matches):
+        super().__init__(f"Found {len(matches)} potential duplicate application(s)")
+        self.matches = matches
+
+
+def _find_potential_duplicates(connection, company_name, job_title, external_job_id):
+    """FR-002: company + external job ID is the strongest indicator when an
+    external ID is available; company + job title is the fallback indicator
+    when it isn't. Both applications and companies are compared using the
+    project's normalized (case/whitespace-insensitive) matching convention.
+    Scans both active and archived applications, since an archived
+    application (e.g. rejected or withdrawn) is still evidence of a prior
+    application to the same role.
+    """
+    if external_job_id:
+        match_clause = (
+            f"{_NORMALIZE_SQL.format(expr='a.external_job_id')} = "
+            f"{_NORMALIZE_SQL.format(expr='?')}"
+        )
+        match_param = external_job_id
+    else:
+        match_clause = (
+            f"{_NORMALIZE_SQL.format(expr='a.job_title')} = "
+            f"{_NORMALIZE_SQL.format(expr='?')}"
+        )
+        match_param = job_title
+
+    rows = connection.execute(
+        _CURRENT_STATUS_CTE
+        + f"""
+        SELECT
+            a.application_id,
+            c.name AS company_name,
+            a.job_title,
+            a.application_date,
+            a.archived_at,
+            st.name AS status_name
+        FROM application a
+        JOIN company c ON c.company_id = a.company_id
+        LEFT JOIN current_status cs ON cs.application_id = a.application_id
+        LEFT JOIN status st ON st.status_id = cs.status_id
+        WHERE {_NORMALIZE_SQL.format(expr='c.name')} =
+                  {_NORMALIZE_SQL.format(expr='?')}
+              AND {match_clause}
+        ORDER BY a.application_date DESC, a.application_id DESC
+        """,
+        (company_name, match_param),
+    ).fetchall()
+
+    return [
+        PotentialDuplicateMatch(
+            application_id=row["application_id"],
+            company_name=row["company_name"],
+            job_title=row["job_title"],
+            application_date=row["application_date"],
+            current_status_name=row["status_name"],
+            is_archived=row["archived_at"] is not None,
+        )
+        for row in rows
+    ]
+
+
 def create_application(
     connection,
     *,
@@ -186,6 +264,7 @@ def create_application(
     compensation_max=None,
     compensation_basis=None,
     notes=None,
+    confirm_duplicate: bool = False,
     now: datetime | None = None,
 ) -> CreateApplicationResult:
     # Defaults to local time, not UTC: _resolve_initial_effective_at compares
@@ -216,6 +295,13 @@ def create_application(
 
     external_job_id = _trim(external_job_id) or None
     job_url = _trim(job_url) or None
+
+    if not confirm_duplicate:
+        matches = _find_potential_duplicates(
+            connection, company_name, job_title, external_job_id
+        )
+        if matches:
+            raise PotentialDuplicateApplicationsDetected(matches)
 
     try:
         status_id = _resolve_status_id(connection, initial_status_name)
@@ -359,7 +445,10 @@ class ApplicationListPage:
         return -(-self.total_count // self.page_size)
 
 
-_LIST_QUERY = """
+# Shared by every query that needs each application's current status
+# (greatest effective_at), so the derivation rule stays identical wherever
+# it's used (architecture.md: "the same derivation shall be used").
+_CURRENT_STATUS_CTE = """
     WITH current_status AS (
         SELECT application_id, status_id
         FROM (
@@ -371,6 +460,11 @@ _LIST_QUERY = """
         )
         WHERE rn = 1
     )
+"""
+
+_LIST_QUERY = (
+    _CURRENT_STATUS_CTE
+    + """
     SELECT
         a.application_id,
         c.name AS company_name,
@@ -393,6 +487,7 @@ _LIST_QUERY = """
     ORDER BY {order_by}
     LIMIT ? OFFSET ?
 """
+)
 
 # Minimal FR-009 record-state visibility (Active/Archived/All), scoped ahead
 # of FR-004's full search/filter feature. Deliberately reuses the same list

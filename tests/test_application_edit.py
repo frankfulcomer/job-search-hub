@@ -31,6 +31,11 @@ def _create(connection, **overrides):
         "application_date": date(2026, 9, 20),
         "source_name": "Job Board",
         "now": NOW,
+        # This file tests editing/reassignment behavior, which routinely
+        # creates several applications sharing a company (and sometimes a
+        # job title) as deliberate setup - not FR-002 duplicate detection,
+        # which has its own dedicated test file.
+        "confirm_duplicate": True,
     }
     fields.update(overrides)
     return create_application(connection, **fields)

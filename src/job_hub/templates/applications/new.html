@@ -11,6 +11,26 @@
     <p id="form-error" class="form-error" role="alert">{{ error }}</p>
     {% endif %}
 
+    {% if duplicate_matches %}
+    <div id="duplicate-warning" class="warning-banner" role="alert">
+        <p>
+            This application looks like it may already be recorded. Review the
+            possible duplicate(s) below, then either change the details above
+            or confirm you want to save it anyway.
+        </p>
+        <ul id="duplicate-matches-list">
+            {% for match in duplicate_matches %}
+            <li id="duplicate-match-{{ match.application_id }}">
+                <a href="{{ url_for('main.application_detail', application_id=match.application_id) }}"
+                   target="_blank" rel="noopener">{{ match.job_title }} at {{ match.company_name }}</a>
+                - applied {{ match.application_date }}, status
+                {{ match.current_status_name or '—' }}{% if match.is_archived %} (archived){% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     <form id="create-application-form" method="post" action="{{ url_for('main.new_application') }}">
         <fieldset>
             <legend>Application</legend>
@@ -69,7 +89,19 @@
         {{ forms.company_headquarters_fields() }}
         {{ forms.position_detail_fields() }}
 
+        {% if duplicate_matches %}
+        <div class="form-field">
+            <label for="confirm_duplicate">
+                <input type="checkbox" id="confirm_duplicate" name="confirm_duplicate" value="1">
+                I've reviewed the possible duplicate(s) above and want to save this
+                application anyway.
+            </label>
+        </div>
+        {% endif %}
+
         <button type="submit" id="submit-application">Save application</button>
+        <a id="cancel-new-application"
+           href="{{ url_for('main.application_list') }}">Cancel</a>
     </form>
 </section>
 {% endblock %}
