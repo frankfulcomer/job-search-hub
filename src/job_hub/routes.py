@@ -13,6 +13,7 @@ from job_hub.applications import (
     LocationInput,
     SharedHeadquartersChangeRequiresConfirmation,
     ValidationError,
+    change_application_status,
     create_application,
     edit_application,
     get_application_detail,
@@ -42,16 +43,14 @@ def _parse_application_date(value):
         raise ValidationError("application_date", "must be a valid date") from None
 
 
-def _parse_effective_at(value):
+def _parse_effective_at(value, field="initial_status_effective_at"):
     value = (value or "").strip()
     if not value:
         return None
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        raise ValidationError(
-            "initial_status_effective_at", "must be a valid date and time"
-        ) from None
+        raise ValidationError(field, "must be a valid date and time") from None
 
 
 def _parse_compensation(field, value):
@@ -278,4 +277,62 @@ def application_edit(application_id):
         work_arrangements=WORK_ARRANGEMENTS,
         employment_types=EMPLOYMENT_TYPES,
         compensation_bases=COMPENSATION_BASES,
+    )
+
+
+@main_bp.route("/applications/<int:application_id>/status", methods=["GET", "POST"])
+def application_status_change(application_id):
+    connection = db.get_db()
+    try:
+        detail = get_application_detail(connection, application_id)
+    except OverflowError:
+        detail = None
+    if detail is None:
+        abort(404)
+
+    error = None
+    error_field = None
+    form_data = {}
+
+    if request.method == "POST":
+        form_data = request.form
+        try:
+            status_name = form_data.get("status_name", "")
+            effective_at = _parse_effective_at(
+                form_data.get("effective_at"), field="effective_at"
+            )
+            notes = _blank_to_none(form_data.get("notes"))
+            change_application_status(
+                connection,
+                application_id,
+                status_name=status_name,
+                effective_at=effective_at,
+                notes=notes,
+            )
+            flash(
+                f"Recorded status change to {status_name.strip()} for "
+                f"{detail.job_title} at {detail.company_name}.",
+                "success",
+            )
+            return redirect(
+                url_for("main.application_detail", application_id=application_id)
+            )
+        except ValidationError as exc:
+            error = str(exc)
+            error_field = exc.field
+        except sqlite3.IntegrityError:
+            error = (
+                "This status change could not be saved because another status "
+                "change already has the same effective date and time. Please "
+                "choose a different date and time."
+            )
+
+    return render_template(
+        "applications/status.html",
+        application_id=application_id,
+        detail=detail,
+        error=error,
+        error_field=error_field,
+        form_data=form_data,
+        status_options=_status_options(connection),
     )

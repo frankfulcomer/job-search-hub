@@ -1,5 +1,6 @@
 import sqlite3
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
@@ -91,6 +92,90 @@ def test_default_status_and_effective_at_when_application_date_is_today(connecti
     ).fetchone()
 
     assert history["effective_at"] == "2026-09-20T15:00:00.000Z"
+
+
+def test_default_now_is_constructed_as_local_not_utc(connection):
+    # Deterministic regression test for a real bug: create_application's
+    # default `now` (used whenever a caller omits it, i.e. every real
+    # request via the Flask routes) was constructed as
+    # `datetime.now(timezone.utc)`, but application_date comes from the
+    # create form's date.today() default, which is local. For several
+    # hours daily in any negative-UTC-offset timezone, UTC's calendar day
+    # is already ahead of local, so an ordinary "create for today with the
+    # default APPLIED status" submission incorrectly required an explicit
+    # effective time it shouldn't need.
+    #
+    # This exercises the exact default-construction code path (no `now`
+    # argument is passed, so `now or datetime.now().astimezone()` must
+    # execute) and asserts on the *call signature* used, not on wall-clock
+    # timing or a simulated outcome. `wraps=datetime` keeps all real
+    # datetime behavior intact (the rest of create_application runs
+    # normally) while recording how `datetime.now` was invoked. If the old
+    # `datetime.now(timezone.utc)` default were restored, `now` would be
+    # called with one positional argument and this assertion would fail,
+    # regardless of the real time or timezone the test happens to run in.
+    with patch("job_hub.applications.datetime", wraps=datetime) as mock_datetime:
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date.today(),
+            source_name="Job Board",
+        )
+
+    mock_datetime.now.assert_called_once_with()
+
+
+def test_default_now_uses_local_today_not_utc_today(connection):
+    # Complementary end-to-end sanity check using the real, unmocked
+    # default: confirms the real system clock and real local timezone
+    # produce a working "create for today" submission. Not a reliable
+    # regression guard on its own - it only reliably fails under the old
+    # buggy default during the UTC/local calendar-boundary window, so it
+    # can silently pass under old *and* new code outside that window. The
+    # deterministic call-signature test above is what actually protects
+    # against reintroducing the bug at any time of day.
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date.today(),
+        source_name="Job Board",
+    )
+
+    detail_status = connection.execute(
+        "SELECT name FROM status WHERE status_id = ?", (result.initial_status_id,)
+    ).fetchone()["name"]
+    assert detail_status == "APPLIED"
+
+
+def test_today_comparison_respects_nows_own_timezone_not_utc(connection):
+    # Verifies a related but distinct property: the "is application_date
+    # today" comparison uses whatever local-meaning timezone an explicitly
+    # passed `now` carries, rather than assuming UTC. Because `now` is
+    # passed explicitly here, `now or <default>` never evaluates the
+    # default expression, so this does NOT exercise or guard the
+    # default-construction bug above (a hardcoded-UTC default would pass
+    # this test identically) - it guards a different possible regression,
+    # in the comparison itself rather than in what `now` defaults to.
+    local_now = datetime(2026, 9, 20, 23, 0, 0, tzinfo=timezone(timedelta(hours=-5)))
+    assert local_now.astimezone(timezone.utc).date() == date(2026, 9, 21)
+
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),  # matches local_now's own date
+        source_name="Job Board",
+        now=local_now,
+    )
+
+    history = connection.execute(
+        "SELECT effective_at FROM application_status_history "
+        "WHERE application_status_history_id = ?",
+        (result.status_history_id,),
+    ).fetchone()
+    assert history["effective_at"] is not None
 
 
 def test_retrospective_initial_status_uses_supplied_status_and_effective_at(connection):

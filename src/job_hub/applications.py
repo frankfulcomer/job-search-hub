@@ -130,13 +130,21 @@ def _resolve_or_create_location(connection, location: LocationInput | None):
     return cursor.lastrowid
 
 
-def _resolve_status_id(connection, status_name):
+def _resolve_status_id(connection, status_name, field="initial_status_name"):
     row = connection.execute(
         "SELECT status_id FROM status WHERE name = ?", (status_name,)
     ).fetchone()
     if row is None:
-        raise ValidationError("initial_status_name", f"unknown status {status_name!r}")
+        raise ValidationError(field, f"unknown status {status_name!r}")
     return row["status_id"]
+
+
+def _reject_future_effective_at(field, effective_at, now):
+    if effective_at.tzinfo is None:
+        effective_at = effective_at.replace(tzinfo=timezone.utc)
+    if effective_at.astimezone(timezone.utc) > now:
+        raise ValidationError(field, "must not be in the future")
+    return effective_at
 
 
 def _resolve_initial_effective_at(
@@ -153,14 +161,9 @@ def _resolve_initial_effective_at(
             "application date is today",
         )
 
-    if effective_at.tzinfo is None:
-        effective_at = effective_at.replace(tzinfo=timezone.utc)
-    if effective_at.astimezone(timezone.utc) > now:
-        raise ValidationError(
-            "initial_status_effective_at", "must not be in the future"
-        )
-
-    return effective_at
+    return _reject_future_effective_at(
+        "initial_status_effective_at", effective_at, now
+    )
 
 
 def create_application(
@@ -185,7 +188,13 @@ def create_application(
     notes=None,
     now: datetime | None = None,
 ) -> CreateApplicationResult:
-    now = now or datetime.now(timezone.utc)
+    # Defaults to local time, not UTC: _resolve_initial_effective_at compares
+    # application_date (a local-calendar-meaning date, e.g. from the create
+    # form's date.today() default) against now.date(). A UTC-aware default
+    # disagrees with local "today" for several hours daily in any negative
+    # UTC-offset timezone. _format_timestamp still normalizes to UTC before
+    # storage regardless of now's tzinfo, so persisted values are unaffected.
+    now = now or datetime.now().astimezone()
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
 
@@ -816,4 +825,61 @@ def edit_application(
         source_id=source_id,
         job_location_id=job_location_id,
         company_reassigned=company_reassigned,
+    )
+
+
+@dataclass
+class ChangeStatusResult:
+    application_id: int
+    status_id: int
+    status_history_id: int
+
+
+def change_application_status(
+    connection,
+    application_id,
+    *,
+    status_name,
+    effective_at: datetime | None = None,
+    notes=None,
+    now: datetime | None = None,
+) -> ChangeStatusResult | None:
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    existing = connection.execute(
+        "SELECT application_id FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    if existing is None:
+        return None
+
+    status_name = _require_text("status_name", status_name)
+    if effective_at is None:
+        raise ValidationError("effective_at", "is required")
+    effective_at = _reject_future_effective_at("effective_at", effective_at, now)
+
+    try:
+        status_id = _resolve_status_id(connection, status_name, field="status_name")
+
+        cursor = connection.execute(
+            """
+            INSERT INTO application_status_history (
+                application_id, status_id, effective_at, notes
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (application_id, status_id, _format_timestamp(effective_at), notes),
+        )
+        status_history_id = cursor.lastrowid
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+    return ChangeStatusResult(
+        application_id=application_id,
+        status_id=status_id,
+        status_history_id=status_history_id,
     )

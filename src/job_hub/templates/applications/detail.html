@@ -9,6 +9,9 @@
     <p>
         <a id="edit-application-link"
            href="{{ url_for('main.application_edit', application_id=detail.application_id) }}">Edit Application</a>
+        &middot;
+        <a id="change-status-link"
+           href="{{ url_for('main.application_status_change', application_id=detail.application_id) }}">Change Status</a>
     </p>
 
     <section id="application-section">
