@@ -362,3 +362,156 @@ def test_post_edit_for_nonexistent_id_returns_404(client):
     response = client.post("/applications/999999/edit", data=_edit_form())
 
     assert response.status_code == 404
+
+
+# --- FR-011: job URL syntactic validation -----------------------------------
+
+
+def test_post_edit_invalid_job_url_shows_validation_error_and_marks_field(
+    client, db_path
+):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(job_url="not a url"),
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in body
+    idx = body.index('id="job_url"')
+    assert 'aria-invalid="true"' in body[idx : idx + 120]
+
+
+def test_post_edit_invalid_job_url_does_not_change_persisted_value(
+    client, db_path
+):
+    _post_application(client, job_url="https://example.com/original")
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(job_url="javascript:alert(1)"),
+    )
+
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT job_url FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    connection.close()
+    assert row["job_url"] == "https://example.com/original"
+
+
+def test_post_edit_valid_job_url_is_saved(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(job_url="https://example.com/updated"),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT job_url FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    connection.close()
+    assert row["job_url"] == "https://example.com/updated"
+
+
+def test_post_edit_can_clear_job_url_back_to_blank(client, db_path):
+    _post_application(client, job_url="https://example.com/original")
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(job_url=""),
+    )
+
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT job_url FROM application WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    connection.close()
+    assert row["job_url"] is None
+
+
+# --- FR-011: compensation basis required when compensation is provided -----
+
+
+def test_post_edit_compensation_without_basis_shows_specific_validation_error(
+    client, db_path
+):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(compensation_min="100000"),
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in body
+    idx = body.index('id="compensation_basis"')
+    assert 'aria-invalid="true"' in body[idx : idx + 200]
+
+
+def test_post_edit_compensation_without_basis_does_not_change_persisted_value(
+    client, db_path
+):
+    _post_application(
+        client,
+        compensation_min="50000",
+        compensation_max="60000",
+        compensation_basis="ANNUAL",
+    )
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(compensation_min="100000"),
+    )
+
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT compensation_min, compensation_basis FROM application "
+        "WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    connection.close()
+    assert row["compensation_min"] == 50000
+    assert row["compensation_basis"] == "ANNUAL"
+
+
+def test_post_edit_compensation_with_basis_succeeds(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            compensation_min="100000",
+            compensation_max="150000",
+            compensation_basis="ANNUAL",
+        ),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT compensation_min, compensation_basis FROM application "
+        "WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    connection.close()
+    assert row["compensation_min"] == 100000
+    assert row["compensation_basis"] == "ANNUAL"

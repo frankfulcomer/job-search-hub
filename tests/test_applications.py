@@ -464,3 +464,209 @@ def test_transaction_rolls_back_completely_on_later_database_failure(connection)
     assert connection.execute(
         "SELECT 1 FROM source WHERE name = 'Brand New Source'"
     ).fetchone() is None
+
+
+# --- FR-011: job URL syntactic validation -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "invalid_url",
+    [
+        "not a url",
+        "javascript:alert(document.cookie)",
+        "ftp://example.com",
+        "example.com",
+        "http://",
+        "https://",
+        "mailto:foo@example.com",
+        "http://exa mple.com",
+        "http://example.com/has space",
+    ],
+)
+def test_invalid_job_url_raises_validation_error(connection, invalid_url):
+    with pytest.raises(ValidationError) as exc_info:
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            job_url=invalid_url,
+            now=NOW,
+        )
+    assert exc_info.value.field == "job_url"
+
+
+def test_invalid_job_url_raises_before_any_writes(connection):
+    before = _counts(connection)
+
+    with pytest.raises(ValidationError):
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            job_url="not a url",
+            now=NOW,
+        )
+
+    assert _counts(connection) == before
+
+
+@pytest.mark.parametrize(
+    "valid_url",
+    [
+        "http://example.com",
+        "https://example.com/job/123",
+        "https://example.com/job?query=1#fragment",
+        "https://example.com:8080/path",
+    ],
+)
+def test_valid_job_url_is_accepted(connection, valid_url):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        job_url=valid_url,
+        now=NOW,
+    )
+    assert result.application_id is not None
+
+
+def test_job_url_with_surrounding_whitespace_is_trimmed_then_validated(connection):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        job_url="   https://example.com/job   ",
+        now=NOW,
+    )
+    row = connection.execute(
+        "SELECT job_url FROM application WHERE application_id = ?",
+        (result.application_id,),
+    ).fetchone()
+    assert row["job_url"] == "https://example.com/job"
+
+
+def test_blank_job_url_remains_optional(connection):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        job_url="   ",
+        now=NOW,
+    )
+    row = connection.execute(
+        "SELECT job_url FROM application WHERE application_id = ?",
+        (result.application_id,),
+    ).fetchone()
+    assert row["job_url"] is None
+
+
+def test_missing_job_url_remains_optional(connection):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        now=NOW,
+    )
+    assert result.application_id is not None
+
+
+# --- FR-011: compensation basis required when compensation is provided -----
+
+
+def test_compensation_min_without_basis_raises_validation_error(connection):
+    with pytest.raises(ValidationError) as exc_info:
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            compensation_min=100000,
+            now=NOW,
+        )
+    assert exc_info.value.field == "compensation_basis"
+
+
+def test_compensation_max_without_basis_raises_validation_error(connection):
+    with pytest.raises(ValidationError) as exc_info:
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            compensation_max=150000,
+            now=NOW,
+        )
+    assert exc_info.value.field == "compensation_basis"
+
+
+def test_compensation_min_and_max_without_basis_raises_validation_error(connection):
+    with pytest.raises(ValidationError) as exc_info:
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            compensation_min=100000,
+            compensation_max=150000,
+            now=NOW,
+        )
+    assert exc_info.value.field == "compensation_basis"
+
+
+def test_compensation_without_basis_raises_before_any_writes(connection):
+    before = _counts(connection)
+
+    with pytest.raises(ValidationError):
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            compensation_min=100000,
+            now=NOW,
+        )
+
+    assert _counts(connection) == before
+
+
+def test_compensation_with_basis_is_accepted(connection):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        compensation_min=100000,
+        compensation_max=150000,
+        compensation_basis="ANNUAL",
+        now=NOW,
+    )
+    assert result.application_id is not None
+
+
+def test_no_compensation_and_no_basis_is_accepted(connection):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        now=NOW,
+    )
+    assert result.application_id is not None

@@ -200,3 +200,99 @@ def test_post_optional_job_location_is_saved(client, db_path):
     location = connection.execute("SELECT city FROM location").fetchone()
     assert location["city"] == "Austin"
     connection.close()
+
+
+# --- FR-011: job URL syntactic validation -----------------------------------
+
+
+def test_post_invalid_job_url_shows_validation_error_and_marks_field(client):
+    response = client.post(
+        "/applications/new", data=_valid_form(job_url="not a url")
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in body
+    idx = body.index('id="job_url"')
+    assert 'aria-invalid="true"' in body[idx : idx + 120]
+
+
+def test_post_invalid_job_url_preserves_other_entered_values(client):
+    response = client.post(
+        "/applications/new",
+        data=_valid_form(job_url="javascript:alert(1)", job_title="Staff Engineer"),
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'value="Staff Engineer"' in body
+    assert 'value="javascript:alert(1)"' in body
+
+
+def test_post_valid_job_url_is_saved(client, db_path):
+    client.post(
+        "/applications/new", data=_valid_form(job_url="https://example.com/job/1")
+    )
+
+    connection = db.connect(db_path)
+    row = connection.execute("SELECT job_url FROM application").fetchone()
+    assert row["job_url"] == "https://example.com/job/1"
+    connection.close()
+
+
+def test_post_blank_job_url_remains_optional(client, db_path):
+    response = client.post("/applications/new", data=_valid_form(job_url=""))
+
+    assert response.status_code == 302
+    connection = db.connect(db_path)
+    row = connection.execute("SELECT job_url FROM application").fetchone()
+    assert row["job_url"] is None
+    connection.close()
+
+
+# --- FR-011: compensation basis required when compensation is provided -----
+
+
+def test_post_compensation_without_basis_shows_specific_validation_error(client):
+    response = client.post(
+        "/applications/new", data=_valid_form(compensation_min="100000")
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in body
+    assert "compensation_basis" in body
+    idx = body.index('id="compensation_basis"')
+    assert 'aria-invalid="true"' in body[idx : idx + 200]
+
+
+def test_post_compensation_without_basis_does_not_create_application(
+    client, db_path
+):
+    client.post("/applications/new", data=_valid_form(compensation_min="100000"))
+
+    connection = db.connect(db_path)
+    count = connection.execute("SELECT COUNT(*) AS n FROM application").fetchone()["n"]
+    connection.close()
+    assert count == 0
+
+
+def test_post_compensation_with_basis_succeeds(client, db_path):
+    response = client.post(
+        "/applications/new",
+        data=_valid_form(
+            compensation_min="100000",
+            compensation_max="150000",
+            compensation_basis="ANNUAL",
+        ),
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT compensation_min, compensation_basis FROM application"
+    ).fetchone()
+    connection.close()
+    assert row["compensation_min"] == 100000
+    assert row["compensation_basis"] == "ANNUAL"

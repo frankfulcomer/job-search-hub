@@ -429,3 +429,136 @@ def test_database_constraint_failure_rolls_back(connection):
     detail = get_application_detail(connection, result.application_id)
     assert detail.job_title == "Engineer"
     assert detail.compensation_min is None
+
+
+# --- FR-011: job URL syntactic validation -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "invalid_url",
+    [
+        "not a url",
+        "javascript:alert(document.cookie)",
+        "ftp://example.com",
+        "example.com",
+        "http://",
+        "http://exa mple.com",
+    ],
+)
+def test_edit_invalid_job_url_raises_validation_error(connection, invalid_url):
+    result = _create(connection)
+
+    with pytest.raises(ValidationError) as exc_info:
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(job_url=invalid_url),
+        )
+    assert exc_info.value.field == "job_url"
+
+
+def test_edit_invalid_job_url_does_not_change_persisted_value(connection):
+    result = _create(connection, job_url="https://example.com/original")
+
+    with pytest.raises(ValidationError):
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(job_url="not a url"),
+        )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.job_url == "https://example.com/original"
+
+
+def test_edit_valid_job_url_is_accepted(connection):
+    result = _create(connection)
+
+    edit_application(
+        connection,
+        result.application_id,
+        **_base_edit_fields(job_url="https://example.com/updated"),
+    )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.job_url == "https://example.com/updated"
+
+
+def test_edit_can_clear_job_url_back_to_blank(connection):
+    result = _create(connection, job_url="https://example.com/original")
+
+    edit_application(
+        connection,
+        result.application_id,
+        **_base_edit_fields(job_url=""),
+    )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.job_url is None
+
+
+# --- FR-011: compensation basis required when compensation is provided -----
+
+
+def test_edit_compensation_min_without_basis_raises_validation_error(connection):
+    result = _create(connection)
+
+    with pytest.raises(ValidationError) as exc_info:
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(compensation_min=100000),
+        )
+    assert exc_info.value.field == "compensation_basis"
+
+
+def test_edit_compensation_max_without_basis_raises_validation_error(connection):
+    result = _create(connection)
+
+    with pytest.raises(ValidationError) as exc_info:
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(compensation_max=150000),
+        )
+    assert exc_info.value.field == "compensation_basis"
+
+
+def test_edit_compensation_without_basis_does_not_change_persisted_value(connection):
+    result = _create(
+        connection,
+        compensation_min=50000,
+        compensation_max=60000,
+        compensation_basis="ANNUAL",
+    )
+
+    with pytest.raises(ValidationError):
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(compensation_min=100000),
+        )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.compensation_min == 50000
+    assert detail.compensation_max == 60000
+    assert detail.compensation_basis == "ANNUAL"
+
+
+def test_edit_compensation_with_basis_is_accepted(connection):
+    result = _create(connection)
+
+    edit_application(
+        connection,
+        result.application_id,
+        **_base_edit_fields(
+            compensation_min=100000,
+            compensation_max=150000,
+            compensation_basis="ANNUAL",
+        ),
+    )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.compensation_min == 100000
+    assert detail.compensation_max == 150000
+    assert detail.compensation_basis == "ANNUAL"

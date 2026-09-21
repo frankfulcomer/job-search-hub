@@ -141,8 +141,20 @@ def test_job_url_rendered_as_clickable_link(client, db_path):
 
 
 def test_javascript_scheme_job_url_is_not_rendered_as_a_link(client, db_path):
-    _post_application(client, job_url="javascript:alert(document.cookie)")
+    # A dangerous-scheme job_url can no longer be created through the create
+    # form (FR-011 entry-time validation now rejects it directly) - this
+    # bypasses that layer with a raw update to verify the detail page's
+    # defense-in-depth still holds for values that predate the validation
+    # or otherwise reach the database by some other path.
+    _post_application(client)
     application_id = _application_id(db_path)
+    conn = db.connect(db_path)
+    conn.execute(
+        "UPDATE application SET job_url = ? WHERE application_id = ?",
+        ("javascript:alert(document.cookie)", application_id),
+    )
+    conn.commit()
+    conn.close()
 
     body = client.get(f"/applications/{application_id}").data.decode()
 

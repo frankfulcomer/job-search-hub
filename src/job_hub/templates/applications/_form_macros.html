@@ -108,6 +108,7 @@
     <div class="form-field">
         <label for="job_url">Job URL</label>
         <input type="url" id="job_url" name="job_url"
+               {{ invalid('job_url') }}
                value="{{ form_data.get('job_url', '') }}">
     </div>
 

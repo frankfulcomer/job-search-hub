@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
+from urllib.parse import urlparse
 
 WORK_ARRANGEMENTS = ("ONSITE", "HYBRID", "REMOTE")
 EMPLOYMENT_TYPES = ("FULL_TIME", "PART_TIME", "CONTRACT", "TEMPORARY")
@@ -51,6 +52,34 @@ def _require_enum(field, value, allowed):
     if value is not None and value not in allowed:
         raise ValidationError(field, f"must be one of {sorted(allowed)}")
     return value
+
+
+def _require_valid_url(field, value):
+    # FR-011: "a job URL... shall represent a syntactically valid web URL."
+    # Restricted to http/https, consistent with job_url_is_safe_link's
+    # existing display-time scheme check - "web URL" means a fetchable web
+    # address, not an arbitrary URI scheme (mailto:, javascript:, etc.).
+    # urlparse is lenient about embedded whitespace (e.g. "http://exa
+    # mple.com" parses "successfully" with that space left in the netloc),
+    # so whitespace is rejected explicitly rather than relying on urlparse
+    # alone; value has already had leading/trailing whitespace stripped by
+    # _trim, so any whitespace remaining here is necessarily internal.
+    parsed = urlparse(value)
+    if (
+        any(char.isspace() for char in value)
+        or parsed.scheme.lower() not in ("http", "https")
+        or not parsed.netloc
+    ):
+        raise ValidationError(field, "must be a valid web URL")
+
+
+def _require_compensation_basis(compensation_min, compensation_max, compensation_basis):
+    if compensation_basis is None and (
+        compensation_min is not None or compensation_max is not None
+    ):
+        raise ValidationError(
+            "compensation_basis", "is required when compensation is provided"
+        )
 
 
 def _format_date(value: date) -> str:
@@ -292,9 +321,12 @@ def create_application(
     compensation_basis = _require_enum(
         "compensation_basis", compensation_basis, COMPENSATION_BASES
     )
+    _require_compensation_basis(compensation_min, compensation_max, compensation_basis)
 
     external_job_id = _trim(external_job_id) or None
     job_url = _trim(job_url) or None
+    if job_url is not None:
+        _require_valid_url("job_url", job_url)
 
     if not confirm_duplicate:
         matches = _find_potential_duplicates(
@@ -778,11 +810,12 @@ class ApplicationDetail:
 
     @property
     def job_url_is_safe_link(self):
-        # job_url has no format validation on entry (FR-011 URL validation is
-        # intentionally deferred; see the Create Application slice). Only
-        # render it as a clickable href for http(s) schemes, so a stored
-        # value like "javascript:..." displays as inert text instead of an
-        # executable link.
+        # Entry-time validation (_require_valid_url) now rejects non-http(s)
+        # job URLs, but this remains necessary defense-in-depth for values
+        # that predate that validation or otherwise reach the database by
+        # some other path. Only render job_url as a clickable href for
+        # http(s) schemes, so a stored value like "javascript:..." displays
+        # as inert text instead of an executable link.
         if not self.job_url:
             return False
         return self.job_url.strip().lower().startswith(("http://", "https://"))
@@ -1012,9 +1045,12 @@ def edit_application(
     compensation_basis = _require_enum(
         "compensation_basis", compensation_basis, COMPENSATION_BASES
     )
+    _require_compensation_basis(compensation_min, compensation_max, compensation_basis)
 
     external_job_id = _trim(external_job_id) or None
     job_url = _trim(job_url) or None
+    if job_url is not None:
+        _require_valid_url("job_url", job_url)
 
     try:
         company_id, is_new_company = _resolve_or_create_company(

@@ -164,11 +164,18 @@ def test_job_url_is_safe_link_only_for_http_and_https_schemes(connection):
     https_result = _create(
         connection, company_name="Other Co", job_url="https://example.com/job"
     )
-    js_result = _create(
-        connection,
-        company_name="Third Co",
-        job_url="javascript:alert(document.cookie)",
+    # A dangerous-scheme job_url can no longer be created through
+    # create_application (FR-011 entry-time validation now rejects it
+    # directly) - this test bypasses that layer with a raw update to
+    # verify job_url_is_safe_link's defense-in-depth still holds for
+    # values that predate the validation or otherwise reach the database
+    # by some other path.
+    js_result = _create(connection, company_name="Third Co")
+    connection.execute(
+        "UPDATE application SET job_url = ? WHERE application_id = ?",
+        ("javascript:alert(document.cookie)", js_result.application_id),
     )
+    connection.commit()
     no_url_result = _create(connection, company_name="Fourth Co")
 
     assert get_application_detail(
