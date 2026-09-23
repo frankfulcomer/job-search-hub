@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -116,7 +116,19 @@ def test_post_archive_records_archived_at_close_to_the_request_time(
     archived_at = datetime.strptime(
         archived_at_str, "%Y-%m-%dT%H:%M:%S.%fZ"
     ).replace(tzinfo=timezone.utc)
-    assert before <= archived_at <= after
+    # ADR-0001 guarantees millisecond persistence precision, not exact
+    # microsecond precision: archive_application formats archived_at via
+    # _format_timestamp, which truncates (rather than rounds) to the
+    # millisecond via `value.microsecond // 1000`, so the persisted value
+    # can legitimately land up to ~1ms below a `before` bound captured with
+    # Python's full microsecond precision, even though the real write
+    # happened after `before`. Comparing against a tolerance matching the
+    # documented storage precision - rather than assuming precision
+    # persistence doesn't guarantee - avoids a genuine, reproducible flake
+    # without weakening what the test actually verifies (that archived_at
+    # reflects the real request time, not a stale or mistimed value).
+    tolerance = timedelta(milliseconds=1)
+    assert before - tolerance <= archived_at <= after + tolerance
 
 
 def test_post_archive_does_not_change_status_history(client, application_id):
