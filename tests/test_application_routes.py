@@ -118,7 +118,7 @@ def test_post_reuses_existing_company_across_submissions(client, db_path):
     connection.close()
 
 
-def test_post_database_constraint_failure_shows_generic_error_not_a_crash(client):
+def test_post_compensation_min_exceeds_max_shows_specific_validation_error(client):
     response = client.post(
         "/applications/new",
         data=_valid_form(
@@ -127,9 +127,31 @@ def test_post_database_constraint_failure_shows_generic_error_not_a_crash(client
             compensation_basis="ANNUAL",
         ),
     )
+    body = response.data.decode()
 
     assert response.status_code == 200
-    assert b'id="form-error"' in response.data
+    assert 'id="form-error"' in body
+    assert "compensation_max" in body
+    idx = body.index('id="compensation_min"')
+    assert 'aria-invalid="true"' in body[idx : idx + 200]
+
+
+def test_post_compensation_min_exceeds_max_does_not_create_application(
+    client, db_path
+):
+    client.post(
+        "/applications/new",
+        data=_valid_form(
+            compensation_min="200000",
+            compensation_max="100000",
+            compensation_basis="ANNUAL",
+        ),
+    )
+
+    connection = db.connect(db_path)
+    count = connection.execute("SELECT COUNT(*) AS n FROM application").fetchone()["n"]
+    connection.close()
+    assert count == 0
 
 
 def test_post_non_finite_compensation_shows_validation_error(client, db_path):

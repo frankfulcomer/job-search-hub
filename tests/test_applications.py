@@ -426,6 +426,16 @@ def test_invalid_work_arrangement_raises_validation_error_before_any_writes(conn
 
 
 def test_database_constraint_failure_raises(connection):
+    # compensation_min > compensation_max is now caught earlier by
+    # _require_compensation_range (ValidationError, see FR-011 tests
+    # below), so this test - which verifies create_application surfaces a
+    # genuine *database*-level constraint failure rather than swallowing
+    # it - uses a non-numeric compensation value instead. No application-
+    # level check validates compensation's numeric type (routes.py's
+    # _parse_compensation does that before create_application is ever
+    # called), so this still reaches the STRICT table's type rejection at
+    # the database layer, same as test_db.py's
+    # test_compensation_column_rejects_non_numeric_value.
     with pytest.raises(sqlite3.IntegrityError):
         create_application(
             connection,
@@ -433,8 +443,7 @@ def test_database_constraint_failure_raises(connection):
             job_title="Engineer",
             application_date=date(2026, 9, 20),
             source_name="Job Board",
-            compensation_min=200000,
-            compensation_max=100000,
+            compensation_min="not-a-number",
             compensation_basis="ANNUAL",
             now=NOW,
         )
@@ -443,6 +452,9 @@ def test_database_constraint_failure_raises(connection):
 def test_transaction_rolls_back_completely_on_later_database_failure(connection):
     before = _counts(connection)
 
+    # See test_database_constraint_failure_raises above for why a
+    # non-numeric compensation value is used here rather than
+    # compensation_min > compensation_max.
     with pytest.raises(sqlite3.IntegrityError):
         create_application(
             connection,
@@ -450,8 +462,7 @@ def test_transaction_rolls_back_completely_on_later_database_failure(connection)
             job_title="Engineer",
             application_date=date(2026, 9, 20),
             source_name="Brand New Source",
-            compensation_min=200000,
-            compensation_max=100000,
+            compensation_min="not-a-number",
             compensation_basis="ANNUAL",
             now=NOW,
         )
@@ -667,6 +678,60 @@ def test_no_compensation_and_no_basis_is_accepted(connection):
         job_title="Engineer",
         application_date=date(2026, 9, 20),
         source_name="Job Board",
+        now=NOW,
+    )
+    assert result.application_id is not None
+
+
+# --- FR-011: compensation min/max relationship messaging --------------------
+
+
+def test_compensation_min_exceeds_max_raises_validation_error(connection):
+    with pytest.raises(ValidationError) as exc_info:
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            compensation_min=200000,
+            compensation_max=100000,
+            compensation_basis="ANNUAL",
+            now=NOW,
+        )
+    assert exc_info.value.field == "compensation_min"
+    assert "compensation_max" in str(exc_info.value)
+
+
+def test_compensation_min_exceeds_max_raises_before_any_writes(connection):
+    before = _counts(connection)
+
+    with pytest.raises(ValidationError):
+        create_application(
+            connection,
+            company_name="Acme Corp",
+            job_title="Engineer",
+            application_date=date(2026, 9, 20),
+            source_name="Job Board",
+            compensation_min=200000,
+            compensation_max=100000,
+            compensation_basis="ANNUAL",
+            now=NOW,
+        )
+
+    assert _counts(connection) == before
+
+
+def test_compensation_min_equal_to_max_is_accepted(connection):
+    result = create_application(
+        connection,
+        company_name="Acme Corp",
+        job_title="Engineer",
+        application_date=date(2026, 9, 20),
+        source_name="Job Board",
+        compensation_min=100000,
+        compensation_max=100000,
+        compensation_basis="ANNUAL",
         now=NOW,
     )
     assert result.application_id is not None

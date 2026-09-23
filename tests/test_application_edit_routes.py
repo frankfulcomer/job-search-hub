@@ -341,7 +341,9 @@ def test_post_edit_confirmed_shared_headquarters_change_persists_for_both_applic
     conn.close()
 
 
-def test_post_edit_database_constraint_failure_shows_generic_error(client, db_path):
+def test_post_edit_compensation_min_exceeds_max_shows_specific_validation_error(
+    client, db_path
+):
     _post_application(client)
     application_id = _application_id(db_path)
 
@@ -353,9 +355,44 @@ def test_post_edit_database_constraint_failure_shows_generic_error(client, db_pa
             compensation_basis="ANNUAL",
         ),
     )
+    body = response.data.decode()
 
     assert response.status_code == 200
-    assert 'id="form-error"' in response.data.decode()
+    assert 'id="form-error"' in body
+    assert "compensation_max" in body
+    idx = body.index('id="compensation_min"')
+    assert 'aria-invalid="true"' in body[idx : idx + 200]
+
+
+def test_post_edit_compensation_min_exceeds_max_does_not_change_persisted_value(
+    client, db_path
+):
+    _post_application(
+        client,
+        compensation_min="50000",
+        compensation_max="60000",
+        compensation_basis="ANNUAL",
+    )
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(
+            compensation_min="200000",
+            compensation_max="100000",
+            compensation_basis="ANNUAL",
+        ),
+    )
+
+    connection = db.connect(db_path)
+    row = connection.execute(
+        "SELECT compensation_min, compensation_max FROM application "
+        "WHERE application_id = ?",
+        (application_id,),
+    ).fetchone()
+    connection.close()
+    assert row["compensation_min"] == 50000
+    assert row["compensation_max"] == 60000
 
 
 def test_post_edit_for_nonexistent_id_returns_404(client):

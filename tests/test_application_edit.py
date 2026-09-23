@@ -414,14 +414,19 @@ def test_job_location_can_be_cleared(connection):
 def test_database_constraint_failure_rolls_back(connection):
     result = _create(connection)
 
+    # compensation_min > compensation_max is now caught earlier by
+    # _require_compensation_range (ValidationError, see FR-011 tests
+    # below), so a non-numeric compensation value is used here instead to
+    # still reach a genuine *database*-level constraint failure - same
+    # reasoning as test_applications.py's
+    # test_database_constraint_failure_raises.
     with pytest.raises(sqlite3.IntegrityError):
         edit_application(
             connection,
             result.application_id,
             **_base_edit_fields(
                 job_title="Changed Title",
-                compensation_min=200000,
-                compensation_max=100000,
+                compensation_min="not-a-number",
                 compensation_basis="ANNUAL",
             ),
         )
@@ -562,3 +567,65 @@ def test_edit_compensation_with_basis_is_accepted(connection):
     assert detail.compensation_min == 100000
     assert detail.compensation_max == 150000
     assert detail.compensation_basis == "ANNUAL"
+
+
+# --- FR-011: compensation min/max relationship messaging --------------------
+
+
+def test_edit_compensation_min_exceeds_max_raises_validation_error(connection):
+    result = _create(connection)
+
+    with pytest.raises(ValidationError) as exc_info:
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(
+                compensation_min=200000,
+                compensation_max=100000,
+                compensation_basis="ANNUAL",
+            ),
+        )
+    assert exc_info.value.field == "compensation_min"
+    assert "compensation_max" in str(exc_info.value)
+
+
+def test_edit_compensation_min_exceeds_max_does_not_change_persisted_value(connection):
+    result = _create(
+        connection,
+        compensation_min=50000,
+        compensation_max=60000,
+        compensation_basis="ANNUAL",
+    )
+
+    with pytest.raises(ValidationError):
+        edit_application(
+            connection,
+            result.application_id,
+            **_base_edit_fields(
+                compensation_min=200000,
+                compensation_max=100000,
+                compensation_basis="ANNUAL",
+            ),
+        )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.compensation_min == 50000
+    assert detail.compensation_max == 60000
+
+
+def test_edit_compensation_min_equal_to_max_is_accepted(connection):
+    result = _create(connection)
+
+    edit_application(
+        connection,
+        result.application_id,
+        **_base_edit_fields(
+            compensation_min=100000,
+            compensation_max=100000,
+            compensation_basis="ANNUAL",
+        ),
+    )
+
+    detail = get_application_detail(connection, result.application_id)
+    assert detail.compensation_min == 100000
+    assert detail.compensation_max == 100000

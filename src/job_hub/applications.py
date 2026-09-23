@@ -82,6 +82,23 @@ def _require_compensation_basis(compensation_min, compensation_max, compensation
         )
 
 
+def _require_compensation_range(compensation_min, compensation_max):
+    # FR-011: "Minimum compensation shall not exceed maximum compensation."
+    # The database CHECK constraint (schema.sql) still enforces this
+    # independently as defense-in-depth; this earlier, application-level
+    # check exists so the user gets a specific message naming the
+    # condition, per FR-011's "clear indication of the invalid field or
+    # condition" - without it, this case previously fell through to the
+    # routes' generic sqlite3.IntegrityError handler ("could not be saved
+    # because it conflicts with existing data"), which names neither.
+    if (
+        compensation_min is not None
+        and compensation_max is not None
+        and compensation_min > compensation_max
+    ):
+        raise ValidationError("compensation_min", "must not exceed compensation_max")
+
+
 def _format_date(value: date) -> str:
     return value.strftime("%Y-%m-%d")
 
@@ -322,6 +339,7 @@ def create_application(
         "compensation_basis", compensation_basis, COMPENSATION_BASES
     )
     _require_compensation_basis(compensation_min, compensation_max, compensation_basis)
+    _require_compensation_range(compensation_min, compensation_max)
 
     external_job_id = _trim(external_job_id) or None
     job_url = _trim(job_url) or None
@@ -1093,6 +1111,7 @@ def edit_application(
         "compensation_basis", compensation_basis, COMPENSATION_BASES
     )
     _require_compensation_basis(compensation_min, compensation_max, compensation_basis)
+    _require_compensation_range(compensation_min, compensation_max)
 
     external_job_id = _trim(external_job_id) or None
     job_url = _trim(job_url) or None
