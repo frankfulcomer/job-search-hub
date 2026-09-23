@@ -515,3 +515,112 @@ def test_post_edit_compensation_with_basis_succeeds(client, db_path):
     connection.close()
     assert row["compensation_min"] == 100000
     assert row["compensation_basis"] == "ANNUAL"
+
+
+# --- FR-010: reference-data selection ----------------------------------------
+
+
+def test_edit_form_renders_datalists(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    body = client.get(f"/applications/{application_id}/edit").data.decode()
+
+    assert 'id="company-name-options"' in body
+    assert 'id="source-name-options"' in body
+    assert 'id="location-city-options"' in body
+    assert 'id="location-state-province-options"' in body
+    assert 'id="location-country-options"' in body
+
+
+def test_edit_form_lists_existing_reference_values_from_other_applications(
+    client, db_path
+):
+    _post_application(
+        client,
+        company_name="Acme Corp",
+        source_name="LinkedIn",
+        job_location_city="Austin",
+        job_location_state_province="TX",
+        job_location_country="USA",
+    )
+    _post_application(client, company_name="Other Co", job_title="Engineer 2")
+    application_id = _application_id(db_path)
+
+    body = client.get(f"/applications/{application_id}/edit").data.decode()
+
+    assert '<option value="Acme Corp">' in body
+    assert '<option value="LinkedIn">' in body
+    assert '<option value="Austin">' in body
+
+
+def test_edit_form_inputs_reference_the_datalists(client, db_path):
+    _post_application(client)
+    application_id = _application_id(db_path)
+
+    body = client.get(f"/applications/{application_id}/edit").data.decode()
+
+    idx = body.index('id="company_name"')
+    assert 'list="company-name-options"' in body[idx : idx + 200]
+
+    idx = body.index('id="source_name"')
+    assert 'list="source-name-options"' in body[idx : idx + 200]
+
+    idx = body.index('id="job_location_city"')
+    assert 'list="location-city-options"' in body[idx : idx + 200]
+
+    idx = body.index('id="company_hq_city"')
+    assert 'list="location-city-options"' in body[idx : idx + 200]
+
+
+def test_post_edit_selecting_existing_company_by_exact_name_reuses_it(
+    client, db_path
+):
+    _post_application(client, company_name="Acme Corp")
+    _post_application(client, company_name="Other Co", job_title="Engineer 2")
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(company_name="Other Co"),
+    )
+
+    conn = db.connect(db_path)
+    count = conn.execute("SELECT COUNT(*) AS n FROM company").fetchone()["n"]
+    conn.close()
+    assert count == 2
+
+
+def test_post_edit_new_company_name_not_in_datalist_still_creates_it(
+    client, db_path
+):
+    _post_application(client, company_name="Acme Corp")
+    application_id = _application_id(db_path)
+
+    client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(company_name="Brand New Co"),
+    )
+
+    conn = db.connect(db_path)
+    names = {row["name"] for row in conn.execute("SELECT name FROM company").fetchall()}
+    conn.close()
+    assert names == {"Acme Corp", "Brand New Co"}
+
+
+def test_datalist_options_still_present_on_edit_validation_error_redisplay(
+    client, db_path
+):
+    _post_application(client, company_name="Acme Corp")
+    _post_application(client, company_name="Other Co", job_title="Engineer 2")
+    application_id = _application_id(db_path)
+
+    response = client.post(
+        f"/applications/{application_id}/edit",
+        data=_edit_form(job_title=""),
+    )
+    body = response.data.decode()
+
+    assert response.status_code == 200
+    assert 'id="form-error"' in body
+    assert '<option value="Other Co">' in body

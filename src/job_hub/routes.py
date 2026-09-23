@@ -29,8 +29,11 @@ from job_hub.applications import (
     delete_status_history,
     edit_application,
     get_application_detail,
+    list_all_company_names,
+    list_all_source_names,
     list_applications,
     list_job_location_filter_options,
+    list_location_component_options,
     list_source_filter_options,
     restore_application,
 )
@@ -224,6 +227,9 @@ def new_application():
         employment_types=EMPLOYMENT_TYPES,
         compensation_bases=COMPENSATION_BASES,
         today=date.today().isoformat(),
+        company_name_options=list_all_company_names(connection),
+        source_name_options=list_all_source_names(connection),
+        location_options=list_location_component_options(connection),
     )
 
 
@@ -477,6 +483,9 @@ def application_edit(application_id):
         work_arrangements=WORK_ARRANGEMENTS,
         employment_types=EMPLOYMENT_TYPES,
         compensation_bases=COMPENSATION_BASES,
+        company_name_options=list_all_company_names(connection),
+        source_name_options=list_all_source_names(connection),
+        location_options=list_location_component_options(connection),
     )
 
 

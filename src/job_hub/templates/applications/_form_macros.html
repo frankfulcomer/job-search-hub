@@ -1,5 +1,42 @@
 {% macro invalid(name) %}{% if error_field == name %}aria-invalid="true"{% endif %}{% endmacro %}
 
+{# FR-010: reference-data selection. Native <datalist> suggestions let the
+   user pick an existing company/source/location while still allowing free
+   text for a new value, entirely through standard HTML - no JavaScript,
+   and no change to how these fields submit or get processed server-side.
+   Rendered once per page; job_location_fields() and
+   company_headquarters_fields() below both reference these same shared
+   lists via their inputs' list="..." attributes, since a location can
+   serve as either job location or company headquarters without
+   distinction (architecture.md). #}
+{% macro reference_data_datalists() %}
+<datalist id="company-name-options">
+    {% for name in company_name_options %}
+    <option value="{{ name }}">
+    {% endfor %}
+</datalist>
+<datalist id="source-name-options">
+    {% for name in source_name_options %}
+    <option value="{{ name }}">
+    {% endfor %}
+</datalist>
+<datalist id="location-city-options">
+    {% for city in location_options.cities %}
+    <option value="{{ city }}">
+    {% endfor %}
+</datalist>
+<datalist id="location-state-province-options">
+    {% for state_province in location_options.state_provinces %}
+    <option value="{{ state_province }}">
+    {% endfor %}
+</datalist>
+<datalist id="location-country-options">
+    {% for country in location_options.countries %}
+    <option value="{{ country }}">
+    {% endfor %}
+</datalist>
+{% endmacro %}
+
 {% macro job_location_fields() %}
 <fieldset>
     <legend>Job location (optional)</legend>
@@ -7,18 +44,21 @@
     <div class="form-field">
         <label for="job_location_city">City</label>
         <input type="text" id="job_location_city" name="job_location_city"
+               list="location-city-options"
                value="{{ form_data.get('job_location_city', '') }}">
     </div>
 
     <div class="form-field">
         <label for="job_location_state_province">State/Province</label>
         <input type="text" id="job_location_state_province" name="job_location_state_province"
+               list="location-state-province-options"
                value="{{ form_data.get('job_location_state_province', '') }}">
     </div>
 
     <div class="form-field">
         <label for="job_location_country">Country</label>
         <input type="text" id="job_location_country" name="job_location_country"
+               list="location-country-options"
                value="{{ form_data.get('job_location_country', '') }}">
     </div>
 </fieldset>
@@ -31,18 +71,21 @@
     <div class="form-field">
         <label for="company_hq_city">City</label>
         <input type="text" id="company_hq_city" name="company_hq_city"
+               list="location-city-options"
                value="{{ form_data.get('company_hq_city', '') }}">
     </div>
 
     <div class="form-field">
         <label for="company_hq_state_province">State/Province</label>
         <input type="text" id="company_hq_state_province" name="company_hq_state_province"
+               list="location-state-province-options"
                value="{{ form_data.get('company_hq_state_province', '') }}">
     </div>
 
     <div class="form-field">
         <label for="company_hq_country">Country</label>
         <input type="text" id="company_hq_country" name="company_hq_country"
+               list="location-country-options"
                value="{{ form_data.get('company_hq_country', '') }}">
     </div>
 </fieldset>

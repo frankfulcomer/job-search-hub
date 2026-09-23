@@ -31,6 +31,8 @@
     </div>
     {% endif %}
 
+    {{ forms.reference_data_datalists() }}
+
     <form id="create-application-form" method="post" action="{{ url_for('main.new_application') }}">
         <fieldset>
             <legend>Application</legend>
@@ -38,6 +40,7 @@
             <div class="form-field">
                 <label for="company_name">Company</label>
                 <input type="text" id="company_name" name="company_name" required
+                       list="company-name-options"
                        {{ forms.invalid('company_name') }}
                        value="{{ form_data.get('company_name', '') }}">
             </div>
@@ -59,6 +62,7 @@
             <div class="form-field">
                 <label for="source_name">Source</label>
                 <input type="text" id="source_name" name="source_name" required
+                       list="source-name-options"
                        {{ forms.invalid('source_name') }}
                        value="{{ form_data.get('source_name', '') }}">
             </div>

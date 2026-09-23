@@ -640,6 +640,53 @@ def list_job_location_filter_options(connection):
     ]
 
 
+# FR-010: reference-data selection suggestions for application entry/editing.
+# Unlike list_source_filter_options/list_job_location_filter_options above
+# (FR-004, deliberately scoped to values *currently in use* so a list filter
+# never offers a dead-end option), these list every existing company/source/
+# location regardless of current usage. A company, source, or location that
+# isn't linked to any application right now (e.g. after an edit reassigns an
+# application elsewhere) is still a real, previously-created record FR-010
+# wants reused rather than accidentally re-created as a near-duplicate.
+
+
+def list_all_company_names(connection):
+    rows = connection.execute("SELECT name FROM company ORDER BY name").fetchall()
+    return [row["name"] for row in rows]
+
+
+def list_all_source_names(connection):
+    rows = connection.execute("SELECT name FROM source ORDER BY name").fetchall()
+    return [row["name"] for row in rows]
+
+
+@dataclass
+class LocationComponentOptions:
+    cities: list[str]
+    state_provinces: list[str]
+    countries: list[str]
+
+
+def list_location_component_options(connection) -> LocationComponentOptions:
+    # Suggests each location component (city, state/province, country)
+    # independently, matching the form's existing three-separate-fields
+    # structure for both job location and company headquarters - both
+    # fieldsets draw from these same shared lists, since a location can
+    # serve as either without distinction (architecture.md).
+    def _distinct(column):
+        rows = connection.execute(
+            f"SELECT DISTINCT {column} FROM location "
+            f"WHERE {column} IS NOT NULL ORDER BY {column}"
+        ).fetchall()
+        return [row[column] for row in rows]
+
+    return LocationComponentOptions(
+        cities=_distinct("city"),
+        state_provinces=_distinct("state_province"),
+        countries=_distinct("country"),
+    )
+
+
 def list_applications(
     connection,
     *,
