@@ -86,17 +86,25 @@ AI-generated implementation is not considered validated solely because it compil
 
 Implementation proceeds from an explicitly scoped task, as described under Implementation Instructions. Implementation should not extend beyond that scope; additional work identified along the way should be reported rather than performed without separate authorization from human direction.
 
+Routine, non-destructive, in-scope operations reasonably necessary to complete an authorized task may proceed without repeated confirmation - for example, reading or searching files, inspecting Git status, diffs, or history, running tests and other verification commands, comparing files, and other reversible local investigation. Confirmation should not be requested for individual routine commands once the overall task is authorized.
+
 An implemented change is verified before being considered ready for review. Verification should include both targeted verification of the specific behavior changed and appropriate broader regression verification, such as the complete automated test suite, before a fix or change is considered complete. See Testing and Verification for expected test layers.
 
-Independent review should occur before a verified change is committed, whenever practical. Review should be performed fresh against the actual change and applicable governing documentation, rather than relying on the implementing agent's own summary. Review findings should be reported by severity and addressed or deliberately deferred; findings should not be left unresolved without a documented decision, and unrequested fixes should not be applied unilaterally, even for issues found during review.
+Independent review should occur before a verified change is committed, whenever practical. Review should be performed fresh against the actual change and applicable governing documentation - including requirements, architecture, and ADRs - independently deriving conclusions rather than relying on the implementing agent's own summary or prior narrative. Review findings should be reported by severity and addressed or deliberately deferred; findings should not be left unresolved without a documented decision, should remain traceable rather than disappearing across later review iterations, and unrequested fixes should not be applied unilaterally, even for issues found during review.
 
-Committing, pushing, verifying continuous integration, and any other action with effects beyond the local working copy each require their own separate, explicit authorization from human direction. Completing one step does not imply authorization for the next.
+Human approval remains required at meaningful control boundaries, regardless of how routine the operations leading up to them were:
 
-Destructive Git operations - including force-push, history rewriting, hard resets, and discarding uncommitted work - require explicit human authorization and should not be performed as an incidental part of another task.
+- Expanding beyond the authorized task scope.
+- Committing changes.
+- Pushing changes.
+- Initiating continuous integration or other externally consequential operations not already explicitly authorized.
+- Destructive Git operations, including force-push, history rewriting, hard resets, and discarding uncommitted work.
+- Deleting, replacing, or intentionally discarding source or project records.
+- Proceeding with unrelated corrective work discovered during an authorized task.
 
-Work stops at the boundary of what was explicitly requested. Status is reported and further direction is awaited, rather than proceeding on an inferred next step.
+Destructive Git operations and record deletion or replacement are not performed as an incidental part of another task, even when the surrounding work is otherwise authorized. Completing or being authorized for one stage does not imply authorization for the next. Work stops at the boundary of what was explicitly requested; status is reported and further direction is awaited, rather than proceeding on an inferred next step.
 
-Unexpected test or CI failures are investigated and reported for a decision rather than corrected without authorization, unless correcting the failure is itself the authorized task.
+Unexpected test or CI failures are investigated before being assumed to result from the current change; investigation should distinguish an introduced regression from a pre-existing defect, a flaky test, an environmental issue, a representation or precision issue, or another cause. The evidence, likely root cause, impact, and recommended disposition are reported for a decision rather than corrected without authorization, unless correcting the failure is itself the authorized task - authorization to investigate a failure does not by itself authorize correcting it. If correction would require work outside the authorized scope, work stops for human direction. Following an authorized correction, appropriate targeted and broader verification is re-run.
 
 Each unit of work concludes with a journal entry recording what was implemented, verified, found, and deferred. See Documentation for what the project journal should preserve.
 
@@ -134,7 +142,7 @@ Selenium tests should focus on important user workflows and browser behavior rat
 
 Automated tests generated with implementation code require review. Passing tests do not independently establish that the underlying requirements are correct or complete.
 
-When practical, a regression test's effectiveness should be demonstrated by recreating or deliberately introducing the defect condition it targets and confirming that the test detects it.
+When practical, a regression test's effectiveness should be demonstrated by recreating or deliberately introducing the defect condition it targets and confirming that the test detects it. See [lessons-learned.md](lessons-learned.md) for project history illustrating this practice, offered as supporting evidence rather than as a substitute for demonstrating a specific test's effectiveness.
 
 ## Source Control
 
@@ -182,7 +190,25 @@ Documentation should:
 
 Significant architectural decisions should be captured through Architecture Decision Records (ADRs).
 
-The project journal should preserve important developments, questions, changes in direction, and the context in which decisions were made.
+The project journal should preserve important developments, questions, changes in direction, and the context in which decisions were made, with enough evidence to reconstruct what occurred, why consequential decisions were made, and how conclusions were verified.
+
+## Transcript Preservation and Provenance
+
+AI-assisted development transcripts are project records that complement the journal and Git history rather than replace either. Journal entries should complement, not attempt to reproduce, raw development transcripts.
+
+Transcript exports are stored under `docs/transcripts/`. Source transcript content is preserved verbatim: a source transcript is not rewritten, summarized, cleaned up, or otherwise modified, and no substantive material is silently omitted. Transcripts should be captured at meaningful project or session boundaries and before transcript context could otherwise be lost.
+
+A continuing session may be exported more than once, and later exports may overlap earlier ones rather than superseding them outright; the newest export should not be assumed to contain all earlier material.
+
+When overlapping transcripts are consolidated into a single canonical transcript, overlap boundaries are determined explicitly from the actual source files - not assumed from filenames, timestamps, or prior summaries - every unique substantive portion is preserved, chronological order is preserved, and the latest rendition of a portion is preferred only where the same material is demonstrably duplicated and no substantive information would be lost. A consolidated transcript may be designated canonical only once its overlap boundaries, chronological continuity, unique-content coverage, exclusions, and fidelity to every contributing source have been independently verified. Provenance is preserved sufficient to identify every source transcript contributing to a canonical transcript, how overlapping regions were resolved, and any source material intentionally excluded and why.
+
+Source transcripts remain provenance records after a verified canonical transcript exists and are not deleted, replaced, or discarded merely because a canonical transcript has been created; doing so is the same kind of consequential action described under AI-Assisted Change Control and requires the same explicit human authorization. Once a canonical transcript has been independently verified against its contributing sources, that verification result and its provenance are preserved rather than unnecessarily repeated; subsequent work may rely on the verified canonical record unless evidence is discovered that calls its integrity or completeness into question.
+
+### Highlights
+
+A highlights document may be derived from a verified canonical transcript to make the development effort easier for a human reviewer to understand. Highlights are a secondary artifact and never replace the canonical transcript, source transcripts, journal, requirements, architecture/ADR documentation, tests, or Git history.
+
+Highlights should emphasize significant requirements decisions, architecture and design decisions, QA reasoning, test-design decisions, defects and findings, independent reviews, verification evidence, CI incidents, root-cause investigations, corrections, lessons learned, important changes in direction, and meaningful human/AI decision points, and should accurately distinguish human decisions and direction from AI implementation, investigation, recommendations, and verification. Highlights do not manufacture a cleaner development story by omitting meaningful failures, corrections, disagreements, rework, or discoveries; those are part of the engineering record and may themselves be significant highlights.
 
 ## Definition of Done
 
