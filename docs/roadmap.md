@@ -88,10 +88,8 @@ management.
 Potential capabilities include:
 
 - Application history.
-- Status history.
 - Recruiter and contact information.
 - Follow-up dates and next actions.
-- Compensation and employment-type information.
 - Expanded notes and activity history.
 - Improved sorting and filtering.
 - Dashboard and summary information.
