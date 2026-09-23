@@ -1,8 +1,8 @@
-# Job Hub Architecture
+# Job Search Hub Architecture
 
 ## Architecture Goals
 
-Job Hub uses a deliberately simple architecture appropriate to a personal job
+Job Search Hub uses a deliberately simple architecture appropriate to a personal job
 application tracking application and a realistic software quality engineering
 portfolio.
 
@@ -216,7 +216,7 @@ Records application lifecycle changes over time.
 | `status_id` | Required foreign key to `STATUS`. |
 | `effective_at` | Required date/time when the status became effective. |
 | `notes` | Optional context associated with the status change. |
-| `created_at` | Timestamp when the history record was entered into Job Hub. |
+| `created_at` | Timestamp when the history record was entered into Job Search Hub. |
 | `last_updated_at` | Timestamp when the history record was last modified. |
 
 The combination of `application_id` and `effective_at` shall be unique.

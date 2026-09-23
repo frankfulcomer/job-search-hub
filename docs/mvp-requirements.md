@@ -1,4 +1,4 @@
-# Job Hub Phase 1 MVP Requirements
+# Job Search Hub Phase 1 MVP Requirements
 
 ## Purpose
 
@@ -49,11 +49,11 @@ Phase 1 does not include:
   application.
 - **Application date** - Date on which the application was submitted.
 - **Initial status** - Application lifecycle status that is effective when the
-  application is first recorded in Job Hub. This may represent a later
+  application is first recorded in Job Search Hub. This may represent a later
   lifecycle state when an existing application is entered retrospectively.
 - **Initial status effective date** - Date and time when the initial status became
   effective in the application lifecycle. This may differ from both the
-  application date and the date the application is entered into Job Hub.
+  application date and the date the application is entered into Job Search Hub.
 - **Job location** - Geographic location associated with the position. This is
   independent of the company's headquarters location and work arrangement.
 - **Company headquarters location** - Geographic location of the organization's

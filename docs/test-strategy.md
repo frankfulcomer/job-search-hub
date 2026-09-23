@@ -1,12 +1,12 @@
-# Job Hub Phase 1 Test Strategy
+# Job Search Hub Phase 1 Test Strategy
 
 ## Purpose
 
-This document defines the testing approach for the Job Hub Phase 1 MVP.
+This document defines the testing approach for the Job Search Hub Phase 1 MVP.
 
 The strategy supports two related goals:
 
-- Verify that Job Hub satisfies its defined product requirements and maintains
+- Verify that Job Search Hub satisfies its defined product requirements and maintains
   appropriate data integrity.
 - Demonstrate a practical software quality engineering approach using multiple
   test levels, risk-based test selection, and continuous integration.
@@ -22,7 +22,7 @@ repositories.
 
 ### `job-search-hub`
 
-The application repository contains the Job Hub product and tests that require
+The application repository contains the Job Search Hub product and tests that require
 knowledge of its internal implementation.
 
 The repository includes:
@@ -39,7 +39,7 @@ logic, persistence behavior, Flask routes, and other internal interfaces.
 
 ### `job-search-hub-tests`
 
-The external automation repository treats Job Hub as a system under test.
+The external automation repository treats Job Search Hub as a system under test.
 
 The repository contains:
 
@@ -49,7 +49,7 @@ The repository contains:
 - Reusable browser-interaction components where they provide clear value.
 - External automated regression and workflow coverage.
 
-Tests in this repository shall interact with Job Hub through its externally
+Tests in this repository shall interact with Job Search Hub through its externally
 observable user interface rather than importing or directly exercising
 application implementation code.
 
@@ -211,9 +211,9 @@ not be treated as measures of product quality by themselves.
 ## Test Data and Isolation
 
 Automated testing shall use controlled test data that is isolated from the
-user's personal Job Hub data.
+user's personal Job Search Hub data.
 
-Automated tests shall not read, modify, or delete the user's personal Job Hub
+Automated tests shall not read, modify, or delete the user's personal Job Search Hub
 database.
 
 ### Application Repository Tests
@@ -232,10 +232,10 @@ Tests shall be repeatable and shall not depend on execution order.
 
 ### External Automation Repository
 
-Selenium automation shall execute against a dedicated test instance of Job Hub
+Selenium automation shall execute against a dedicated test instance of Job Search Hub
 using a dedicated test database.
 
-The external automation environment shall not use the user's personal Job Hub
+The external automation environment shall not use the user's personal Job Search Hub
 database.
 
 Automated scenarios shall create or establish the data required for their
@@ -295,8 +295,8 @@ external Selenium automation.
 The workflow shall include:
 
 - Installing the automation dependencies.
-- Obtaining or starting the required Job Hub application version.
-- Preparing an isolated Job Hub test environment and test database.
+- Obtaining or starting the required Job Search Hub application version.
+- Preparing an isolated Job Search Hub test environment and test database.
 - Starting the application.
 - Starting the supported browser and WebDriver environment.
 - Running the appropriate Selenium test suite.
@@ -311,7 +311,7 @@ they provide useful diagnostic information.
 The application and automation repositories shall remain independently
 maintainable.
 
-External automation shall verify a known version or revision of Job Hub so that
+External automation shall verify a known version or revision of Job Search Hub so that
 test results can be associated with the application version under test.
 
 Cross-repository automation may be introduced when it provides sufficient
@@ -324,7 +324,7 @@ such a need exists.
 ### Continuous Delivery
 
 Continuous delivery or deployment is not required for the initial Phase 1
-implementation because Job Hub is initially intended to run locally.
+implementation because Job Search Hub is initially intended to run locally.
 
 Deployment automation may be introduced in a future phase if the application
 gains a defined deployment target.

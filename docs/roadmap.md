@@ -1,8 +1,8 @@
-# Job Hub Product Roadmap
+# Job Search Hub Product Roadmap
 
 ## Product Vision
 
-Job Hub is a lightweight job-search management application designed to organize
+Job Search Hub is a lightweight job-search management application designed to organize
 opportunities throughout the job-search lifecycle.
 
 The project has two complementary goals:
@@ -17,7 +17,7 @@ provide meaningful verification of those features.
 
 ## Architecture Principle
 
-Job Hub favors simple, maintainable solutions over unnecessary technical
+Job Search Hub favors simple, maintainable solutions over unnecessary technical
 complexity.
 
 New technologies and architectural components are introduced only when they
@@ -82,7 +82,7 @@ Initial capabilities include:
 
 ### Product Goals
 
-Expand Job Hub from opportunity tracking into broader job-search workflow
+Expand Job Search Hub from opportunity tracking into broader job-search workflow
 management.
 
 Potential capabilities include:
@@ -175,7 +175,7 @@ to another database.
 
 ---
 
-## Phase 4 - Intelligent Job Hub
+## Phase 4 - Intelligent Job Search Hub
 
 ### Product Goals
 
