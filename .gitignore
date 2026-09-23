@@ -30,6 +30,7 @@ reports/private/
 
 # Database dumps and local databases
 *.sql
+!src/job_hub/schema.sql
 *.dump
 *.sqlite
 *.sqlite3
