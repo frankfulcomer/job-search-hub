@@ -8,7 +8,10 @@ from job_hub.config import Config
 def create_app(config=None):
     app = Flask(__name__)
     app.config.from_mapping(
-        DATABASE=os.path.join(app.instance_path, "job_hub.sqlite3"),
+        DATABASE=os.environ.get(
+            "JOB_HUB_DATABASE",
+            os.path.join(app.instance_path, "job_hub.sqlite3"),
+        ),
     )
     app.config.from_object(config or Config)
 
