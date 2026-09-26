@@ -172,3 +172,72 @@ described above. Each audit pass treated the prior pass's conclusions as
 a starting hypothesis to verify, not a fact to build on - which is what
 allowed later passes to catch what earlier ones had missed, including
 inaccuracies introduced by the audit-and-fix process itself.
+
+## Privacy and Public Release Preparation
+
+**A development transcript's captured tool output and terminal chrome
+carried personal information that a review focused on prose content
+would not have caught.** The verified canonical transcript's own text
+never named its author, but eight of its lines - a captured Claude Code
+status line and several `Write`/export tool-output lines - embedded the
+account's real email address and absolute local filesystem paths that
+exposed the operating-system username and home-directory layout. Both
+categories were introduced automatically by the tools being transcribed,
+not typed as prose by anyone the review would have recognized as
+"personal information" from a narrative read. A transcript privacy
+review needs to specifically inspect captured tool invocations, status
+lines, and file paths, not only the surrounding narrative text, since
+personal information can arrive through the environment rather than
+through anything a person wrote.
+
+**Sanitizing the canonical transcript did not, by itself, remove the
+personal information the audit found, because unredacted duplicates of
+the same content remained independently reachable in Git history.**
+Four raw source transcripts, whose unique content had already been
+fully incorporated into the verified canonical transcript per
+`development-process.md`'s Transcript Preservation and Provenance
+guidance, still existed as committed files earlier in history, carrying
+the same real email address and absolute local paths, unredacted. A
+privacy audit of a document that has a verified derivative is
+incomplete until the documents it was derived from are checked
+independently; a clean derivative does not imply its sources are clean.
+
+**Removing a file from Git's current tree does not remove it from Git
+history, and doing so via an ordinary new commit would not have closed
+the actual exposure.** Because the four raw transcripts' unredacted
+content would remain fully recoverable from the commits that introduced
+them regardless of any later commit deleting the files, the only
+remediation that matched the actual risk was rewriting history to drop
+the four files from every commit that had ever contained them - which
+necessarily changed the hash of every commit from the first
+file-introducing commit onward (leaving two of those original commits
+empty, preserved only for message and date continuity) and required a
+force-push to replace the previously public history. Commit messages,
+authorship, and dates were preserved unchanged through the rewrite, and
+the sanitized canonical transcript's line count and unrelated content
+were verified identical to the pre-sanitization version apart from the
+eight corrected lines. Treating "delete the file" and "remove it from
+history" as the same operation would have left the exposure in place.
+
+**A force-push that rewrites a branch's history does not itself delete
+the previously pushed objects from the hosting platform, or from any
+existing local clone.** After the local history rewrite above was
+force-pushed to `origin/main`, the pre-rewrite commits remained
+independently retrievable: as unreferenced objects in GitHub's own
+server-side storage (accessible by direct commit SHA even though no
+branch or tag pointed at them anymore), and in this local clone's own
+object store, reachable via `git reflog` even after local `main` was
+reconciled to the sanitized remote. A version-control tag was a further,
+separate gap of the same kind - a local tag continued pointing at a
+pre-rewrite commit until it was explicitly replaced with the sanitized
+remote tag. Closing a history-rewrite-based privacy remediation required
+three further, independent actions beyond the rewrite and the push
+itself: engaging the hosting platform to purge the unreferenced
+server-side objects (confirmed only once representative pre-rewrite
+commit SHAs returned HTTP 404 when requested directly), reconciling
+every local branch to the sanitized remote, and reconciling every other
+ref - including tags - that could still point at a pre-rewrite commit.
+Rewriting history on one branch is not sufficient by itself; every place
+a copy of the old objects could still be retrieved from - the hosting
+platform's storage, any clone's local object store, and every ref in
+every clone - has to be independently checked and reconciled.
