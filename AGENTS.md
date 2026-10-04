@@ -1,6 +1,6 @@
 # Working in this repository
 
-Codex: before planning or changing files, read the **Shared operating rules** section of [the canonical workflow instructions](/home/frank/Documents/Codex/2026-10-04/le/outputs/ai-development-workflow/AGENTS.md#shared-operating-rules). The workflow-maintenance section applies only to that repository.
+Codex: before planning or changing files, read the **Shared operating rules** section of [the canonical workflow instructions](/home/frank/Projects/ai-development-workflow/AGENTS.md#shared-operating-rules). The workflow-maintenance section applies only to that repository.
 
 Codex: read `docs/development-process.md` and the requirements, architecture/ADRs, and test strategy relevant to the task.
 
