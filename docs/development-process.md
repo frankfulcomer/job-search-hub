@@ -106,7 +106,7 @@ Destructive Git operations and record deletion or replacement are not performed 
 
 Unexpected test or CI failures are investigated before being assumed to result from the current change; investigation should distinguish an introduced regression from a pre-existing defect, a flaky test, an environmental issue, a representation or precision issue, or another cause. The evidence, likely root cause, impact, and recommended disposition are reported for a decision rather than corrected without authorization, unless correcting the failure is itself the authorized task - authorization to investigate a failure does not by itself authorize correcting it. If correction would require work outside the authorized scope, work stops for human direction. Following an authorized correction, appropriate targeted and broader verification is re-run.
 
-Each unit of work concludes with a journal entry recording what was implemented, verified, found, and deferred. See Documentation for what the project journal should preserve.
+When a unit of work produces a meaningful requirement, decision, engineering finding, or maintenance-relevant fact, update the appropriate existing project documentation. Use the journal for significant developments and verification context; routine agent actions do not require an entry merely to satisfy process overhead. See Documentation for what should be preserved.
 
 ## Implementation Instructions
 
@@ -190,11 +190,11 @@ Documentation should:
 
 Significant architectural decisions should be captured through Architecture Decision Records (ADRs).
 
-The project journal should preserve important developments, questions, changes in direction, and the context in which decisions were made, with enough evidence to reconstruct what occurred, why consequential decisions were made, and how conclusions were verified.
+The project journal should preserve important developments, questions, changes in direction, and the context in which decisions were made, with enough evidence to reconstruct what occurred, why consequential decisions were made, and how conclusions were verified. Durable requirements, decisions, engineering findings, and maintenance-relevant facts should be recorded in the document that owns them, rather than left only in a conversation or duplicated across documents. Documentation effort should be proportional to the significance of the information.
 
 ## Transcript Preservation and Provenance
 
-AI-assisted development transcripts are project records that complement the journal and Git history rather than replace either. Journal entries should complement, not attempt to reproduce, raw development transcripts.
+AI-assisted development transcripts preserve working conversations and provenance; they complement the journal and Git history rather than replace either. They do not replace durable requirements, architectural decisions, testing discoveries, or maintenance documentation. Journal entries should complement, not attempt to reproduce, raw development transcripts.
 
 Transcript exports are stored under `docs/transcripts/`. Source transcript content is preserved verbatim: a source transcript is not rewritten, summarized, cleaned up, or otherwise modified, and no substantive material is silently omitted. Transcripts should be captured at meaningful project or session boundaries and before transcript context could otherwise be lost.
 
